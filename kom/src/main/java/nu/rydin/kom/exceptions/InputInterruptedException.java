@@ -1,0 +1,19 @@
+/*
+ * Created on Jun 26, 2004
+ *
+ * Distributed under the GPL license.
+ * See http://www.gnu.org/ for details
+ */
+
+package nu.rydin.kom.exceptions;
+
+/**
+ * Thrown when the current input has been interrupted, typically on a user request.
+ *
+ * @author Henrik Schr�der
+ */
+public class InputInterruptedException extends SystemException {
+  static final long serialVersionUID = 2005;
+
+  // Just for classification
+}
