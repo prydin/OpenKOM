@@ -54,7 +54,6 @@ import nu.rydin.kom.events.MessageDeletedEvent;
 import nu.rydin.kom.events.NewMessageEvent;
 import nu.rydin.kom.events.ReloadUserProfileEvent;
 import nu.rydin.kom.events.UserAttendanceEvent;
-import nu.rydin.kom.exceptions.AllRecipientsNotReachedException;
 import nu.rydin.kom.exceptions.AlreadyMemberException;
 import nu.rydin.kom.exceptions.AmbiguousNameException;
 import nu.rydin.kom.exceptions.AuthenticationException;
@@ -69,7 +68,6 @@ import nu.rydin.kom.exceptions.NoMoreMessagesException;
 import nu.rydin.kom.exceptions.NoMoreNewsException;
 import nu.rydin.kom.exceptions.NoRulesException;
 import nu.rydin.kom.exceptions.NotAReplyException;
-import nu.rydin.kom.exceptions.NotLoggedInException;
 import nu.rydin.kom.exceptions.NotMemberException;
 import nu.rydin.kom.exceptions.ObjectNotFoundException;
 import nu.rydin.kom.exceptions.OriginalsNotAllowedException;
@@ -113,199 +111,73 @@ import nu.rydin.kom.utils.Logger;
  * @author <a href=mailto:jepson@xyzzy.se>Jepson</a>
  */
 public class ServerSessionImpl implements ServerSession, EventTarget, EventSource {
-  private class HeartbeatListenerImpl implements HeartbeatListener {
-    public void heartbeat() {
-      ServerSessionImpl that = ServerSessionImpl.this;
-      long now = System.currentTimeMillis();
-      if (now - that.m_lastHeartbeat > ServerSettings.getIdleNotificationThreashold()) {
-        UserInfo ui = that.getLoggedInUserInEventHandler();
-        if (ui != null)
-          that.m_sessions.broadcastEvent(
-              new UserAttendanceEvent(ui.getId(), ui.getName(), UserAttendanceEvent.AWOKE));
-      }
-      that.m_lastHeartbeat = System.currentTimeMillis();
-    }
-  }
-
-  private abstract static class DeferredEvent {
-    protected final Event m_event;
-
-    public DeferredEvent(Event event) {
-      m_event = event;
-    }
-
-    public abstract void dispatch(SessionManager manager);
-  }
-
-  private static class DeferredSend extends DeferredEvent {
-    private final long m_recipient;
-
-    public DeferredSend(long recipient, Event event) {
-      super(event);
-      m_recipient = recipient;
-    }
-
-    public void dispatch(SessionManager manager) {
-      manager.sendEvent(m_recipient, m_event);
-    }
-  }
-
-  private static class DeferredBroadcast extends DeferredEvent {
-    public DeferredBroadcast(Event event) {
-      super(event);
-    }
-
-    public void dispatch(SessionManager manager) {
-      manager.broadcastEvent(m_event);
-    }
-  }
-
-  private static interface MessageOperation {
-    public void perform(long messageId) throws ObjectNotFoundException, UnexpectedException;
-  }
-
-  private class MarkAsUnreadOperation implements MessageOperation {
-    public void perform(long messageId) throws ObjectNotFoundException, UnexpectedException {
-      ServerSessionImpl.this.innerMarkAsUnreadAtLogout(messageId);
-    }
-  }
-
-  private class MarkAsReadOperation implements MessageOperation {
-    public void perform(long messageId) throws ObjectNotFoundException, UnexpectedException {
-      ServerSessionImpl that = ServerSessionImpl.this;
-      try {
-        MessageManager mm = that.m_da.getMessageManager();
-        MessageOccurrence[] mos = mm.getVisibleOccurrences(that.getLoggedInUserId(), messageId);
-        for (int idx = 0; idx < mos.length; ++idx) {
-          MessageOccurrence mo = mos[idx];
-          that.markMessageAsReadEx(mo.getConference(), mo.getLocalnum());
-        }
-      } catch (SQLException e) {
-        throw new UnexpectedException(that.getLoggedInUserId(), e);
-      }
-    }
-  }
-
-  private class SortableMembershipInfo implements Comparable<SortableMembershipInfo> {
-    private final MembershipInfo m_mi;
-    private final long m_parentCount;
-
-    public SortableMembershipInfo(MembershipInfo mi, long parentCount) {
-      m_mi = mi;
-      m_parentCount = parentCount;
-    }
-
-    public MembershipInfo getMembershipInfo() {
-      return m_mi;
-    }
-
-    protected long getId() {
-      return m_mi.getConference();
-    }
-
-    protected long getPriority() {
-      return m_mi.getPriority();
-    }
-
-    protected long getParentCount() {
-      return m_parentCount;
-    }
-
-    public int compareTo(SortableMembershipInfo that) {
-      return this.getParentCount() < that.getParentCount()
-          ? -1
-          : (this.getParentCount() > that.getParentCount()
-              ? 1
-              : (this.getPriority() < that.getPriority() ? -1 : 1));
-    }
-  }
-
   private static final int MAX_SELECTION = 1000;
-
-  /** Current conference id, or -1 if it could not be determined */
-  private long m_currentConferenceId;
-
+  /** User variables shared across sessions for the same user */
+  protected final UserContext m_userContext;
   /** Time of login */
   private final long m_loginTime;
-
   /** The session id (assigned by factory) */
   private final int m_sessionId;
-
-  private short m_clientType;
-
-  /*
-   * Id of last message read, or -1 if no message has been read yet.
-   */
-  private long m_lastReadMessageId = -1;
-
-  /** Reply stack. */
-  private ReplyStackFrame m_replyStack = null;
-
-  /** The DataAccess object to use. Reset between transactions */
-  private DataAccess m_da;
-
   /** The currently active sessions */
   private final SessionManager m_sessions;
-
-  /** Has this session been closed? */
-  private boolean m_closed = false;
-
   /** List of incoming events */
-  private final LinkedList<Event> m_incomingEvents = new LinkedList<Event>();
-
+  private final LinkedList<Event> m_incomingEvents = new LinkedList<>();
   /**
    * List of deferred events, i.e. events that will be sent once the current transaction is
    * committed.
    */
-  private final LinkedList<DeferredEvent> m_deferredEvents = new LinkedList<DeferredEvent>();
+  private final LinkedList<DeferredEvent> m_deferredEvents = new LinkedList<>();
+  /** Usage statistics */
+  private final UserLogItem m_stats;
+  /** Mutex controlling session access */
+  private final Mutex m_mutex = new Mutex();
 
+  /** The user currently logged in */
+  private final long m_userId;
+
+  private final SelectedMessages m_selectedMessages = new SelectedMessages();
+  /** Timestamp of last heartbeat */
+  protected long m_lastHeartbeat = System.currentTimeMillis();
+  /** Current conference id, or -1 if it could not be determined */
+  private long m_currentConferenceId;
+
+  private short m_clientType;
+  /*
+   * Id of last message read, or -1 if no message has been read yet.
+   */
+  private long m_lastReadMessageId = -1;
+  /** Reply stack. */
+  private ReplyStackFrame m_replyStack = null;
+  /** The DataAccess object to use. Reset between transactions */
+  private DataAccess m_da;
+  /** Has this session been closed? */
+  private boolean m_closed = false;
   /** Last suggested command */
   private short m_lastSuggestedCommand = -1;
-
   /**
    * Are we valid? If an attempt to gracefully shut down a session fails, we may mark a session as
    * invalid, thus prventing any client calls from getting through.
    */
   private boolean m_valid = true;
-
-  /** Timestamp of last heartbeat */
-  protected long m_lastHeartbeat = System.currentTimeMillis();
-
-  /** Usage statistics */
-  private final UserLogItem m_stats;
-
-  /** Mutex controlling session access */
-  private final Mutex m_mutex = new Mutex();
-
-  /** The user currently logged in */
-  private long m_userId;
-
   /** Backwards-linked list of read message */
   private ReadLogItem m_readLog;
-
   /** Messages to mark as unread at logout */
   private ReadLogItem m_pendingUnreads;
-
-  /** User variables shared across sessions for the same user */
-  protected final UserContext m_userContext;
-
   /** Last object acted on, used by user list */
   private long m_lastObject;
-
   /** Free text used by user list, if set by user. */
   private String m_freeActivityText;
-
   /** Activity types, used by user list. Last activity used to revert from a temp auto change. */
   private short m_currentActivity;
 
   private short m_lastActivity;
 
-  private final int FILTER_ADJUST_THREASHOLD = 10;
-
-  private SelectedMessages m_selectedMessages;
-
   public ServerSessionImpl(
-      DataAccess da, long userId, int sessionId, short clientType, SessionManager sessions)
+      final DataAccess da,
+      final long userId,
+      final int sessionId,
+      final short clientType,
+      final SessionManager sessions)
       throws UnexpectedException {
     try {
       // Set up statistics collection
@@ -326,7 +198,6 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
       m_sessionId = sessionId;
       m_currentActivity = Activities.AUTO;
       m_lastActivity = Activities.AUTO;
-      m_selectedMessages = new SelectedMessages();
 
       // Create user context
       //
@@ -341,20 +212,20 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
         // If we have saved unreads, load them and apply
         //
         try {
-          this.loadUnreadMarkers();
-          this.applyUnreadMarkers();
+          loadUnreadMarkers();
+          applyUnreadMarkers();
           m_userContext.saveMemberships(m_da.getMembershipManager());
-        } catch (ObjectNotFoundException e) {
+        } catch (final ObjectNotFoundException e) {
           // No file, just ignore
         }
 
         // Go to first conference with unread messages
         //
-        long firstConf =
+        final long firstConf =
             m_userContext
                 .getMemberships()
                 .getFirstConferenceWithUnreadMessages(da.getConferenceManager());
-        this.setCurrentConferenceId(firstConf != -1 ? firstConf : userId);
+        setCurrentConferenceId(firstConf != -1 ? firstConf : userId);
 
         // Commit. We have to do this manually here, since we're not called through
         // a TransactionalInvocationHandler.
@@ -362,19 +233,20 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
         m_da.commit();
         m_da = null;
       }
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
-    } catch (ObjectNotFoundException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException | ObjectNotFoundException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     } finally {
-      if (m_da != null) m_da.rollback();
+      if (m_da != null) {
+        m_da.rollback();
+      }
     }
   }
 
+  @Override
   public void finalize() {
     try {
-      this.close();
-    } catch (UnexpectedException e) {
+      close();
+    } catch (final UnexpectedException e) {
       e.printStackTrace();
     }
   }
@@ -387,99 +259,103 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
     m_mutex.release();
   }
 
-  public void setCurrentConferenceId(long id) throws UnexpectedException, ObjectNotFoundException {
-    // We might need to save some membership stuff.
-    //
-    if (m_currentConferenceId != id) this.leaveConference();
-
-    m_currentConferenceId = id;
-  }
-
+  @Override
   public ConferenceInfo getCurrentConference() {
     try {
       return m_da.getConferenceManager().loadConference(m_currentConferenceId);
-    } catch (ObjectNotFoundException e) {
+    } catch (final ObjectNotFoundException | SQLException e) {
       // TODO: What do we do here? The current conference may have been
       // deleted!
       //
       throw new RuntimeException(e);
-    } catch (SQLException e) {
-      // SQLExceptions here mean that something has gone terribly wrong!
-      //
-      throw new RuntimeException(e);
-    }
+    } // SQLExceptions here mean that something has gone terribly wrong!
   }
 
+  @Override
   public int getSessionId() {
     return m_sessionId;
   }
 
+  @Override
   public short getClientType() {
     return m_clientType;
   }
 
-  public void setClientType(short clientType) {
+  public void setClientType(final short clientType) {
     m_clientType = clientType;
   }
 
+  @Override
   public long getCurrentConferenceId() {
     return m_currentConferenceId;
   }
 
+  @Override
+  public void setCurrentConferenceId(final long id) throws UnexpectedException {
+    // We might need to save some membership stuff.
+    //
+    if (m_currentConferenceId != id) {
+      leaveConference();
+    }
+
+    m_currentConferenceId = id;
+  }
+
+  @Override
   public UserInfo getLoggedInUser() {
     try {
       return m_da.getUserManager().loadUser(m_userId);
-    } catch (ObjectNotFoundException e) {
+    } catch (final ObjectNotFoundException | SQLException e) {
       // The logged in user should definately be found!!!
-      //
-      throw new RuntimeException(e);
-    } catch (SQLException e) {
-      // SQLExceptions here mean that something has gone terribly wrong!
       //
       throw new RuntimeException(e);
     }
   }
 
+  @Override
   public long getLoggedInUserId() {
     return m_userId;
   }
 
+  @Override
   public long getLoginTime() {
     return m_loginTime;
   }
 
+  @Override
   public SessionState getSessionState() {
     try {
-      Map<Long, Long> filterCache = m_userContext.getFilterCache();
-      MembershipList memberships = m_userContext.getMemberships();
-      long conf = this.getCurrentConferenceId();
-      long user = this.getLoggedInUserId();
-      ConferenceManager cm = m_da.getConferenceManager();
-      boolean hasFilters = filterCache.size() > 0;
+      final Map<Long, Long> filterCache = m_userContext.getFilterCache();
+      final MembershipList memberships = m_userContext.getMemberships();
+      final long conf = getCurrentConferenceId();
+      final long user = getLoggedInUserId();
+      final ConferenceManager cm = m_da.getConferenceManager();
+      final boolean hasFilters = filterCache.size() > 0;
 
       // While what we found matches a filter...
       //
       for (; ; ) {
         // Do we have any unread mail?
         //
-        if ((this.getLoggedInUser().getFlags1() & UserFlags.PRIORITIZE_MAIL) != 0) {
+        if ((getLoggedInUser().getFlags1() & UserFlags.PRIORITIZE_MAIL) != 0) {
           try {
-            int nextMail = memberships.getNextMessageInConference(user, cm);
+            final int nextMail = memberships.getNextMessageInConference(user, cm);
             try {
               if (nextMail != -1) {
                 if (hasFilters
-                    && this.applyFiltersForMessage(
-                        this.localToGlobal(user, nextMail), user, nextMail, FilterFlags.MAILS))
+                    && applyFiltersForMessage(
+                        localToGlobal(user, nextMail), user, nextMail, FilterFlags.MAILS)) {
                   continue;
-                return new SessionState(CommandSuggestions.NEXT_MAIL, user, this.countUnread(user));
+                }
+                return new SessionState(CommandSuggestions.NEXT_MAIL, user, countUnread(user));
               }
-            } catch (MessageNotFoundException e) {
+            } catch (final MessageNotFoundException e) {
               // Message is probably deleted. Skip it!
               //
               memberships.markAsRead(user, nextMail);
               continue;
             }
-          } catch (ObjectNotFoundException e) {
+          } catch (final ObjectNotFoundException e) {
             // Problem reading next mail. Try conferences instead
             //
             Logger.error(this, "Error finding next mail", e);
@@ -488,34 +364,35 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
 
         // Do we have any selected messages?
         //
-        if (this.getSelectedMessages().hasUnreadMessages()) {
+        if (getSelectedMessages().hasUnreadMessages()) {
           return new SessionState(
-              CommandSuggestions.NEXT_SELECTED, conf, this.getSelectedMessages().getUnread());
+              CommandSuggestions.NEXT_SELECTED, conf, getSelectedMessages().getUnread());
         }
 
         // First, try a reply. Then, try any unread message in current conference
         //
-        long nextReply = this.peekReply();
+        final long nextReply = peekReply();
         if (nextReply != -1) {
           try {
-            SessionState answer =
-                new SessionState(CommandSuggestions.NEXT_REPLY, conf, this.countUnread(conf));
-            MessageOccurrence occ = null;
+            final SessionState answer =
+                new SessionState(CommandSuggestions.NEXT_REPLY, conf, countUnread(conf));
+            final MessageOccurrence occ;
             try {
-              occ = this.getMostRelevantOccurrence(conf, nextReply);
-            } catch (MessageNotFoundException e) {
+              occ = getMostRelevantOccurrence(conf, nextReply);
+            } catch (final MessageNotFoundException e) {
               // Probably deleted. Skip it!
               //
-              this.popReply();
+              popReply();
               continue;
             }
 
             if (hasFilters
-                && this.applyFiltersForMessage(
-                    nextReply, occ.getConference(), occ.getLocalnum(), FilterFlags.MESSAGES))
+                && applyFiltersForMessage(
+                    nextReply, occ.getConference(), occ.getLocalnum(), FilterFlags.MESSAGES)) {
               continue;
+            }
             return answer;
-          } catch (ObjectNotFoundException e) {
+          } catch (final ObjectNotFoundException e) {
             // Problem getting next reply. Try messages
             //
             Logger.error(this, "Error finding next reply", e);
@@ -527,13 +404,13 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
         int nextMessage = -1;
         try {
           nextMessage = memberships.getNextMessageInConference(conf, cm);
-        } catch (ObjectNotFoundException e) {
+        } catch (final ObjectNotFoundException e) {
           // Can't find current conference, it must have been deleted.
           // Reload memberships and try to go to the next conference.
           //
           try {
-            this.reloadMemberships();
-          } catch (ObjectNotFoundException e2) {
+            reloadMemberships();
+          } catch (final ObjectNotFoundException e2) {
             Logger.error(this, "Strange state!", e);
             return new SessionState(CommandSuggestions.ERROR, -1, 0);
           }
@@ -545,21 +422,19 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
           try {
             if (nextMessage != -1) {
               if (hasFilters
-                  && this.applyFiltersForMessage(
-                      this.localToGlobal(conf, nextMessage),
-                      conf,
-                      nextMessage,
-                      FilterFlags.MESSAGES)) continue;
-              return new SessionState(
-                  CommandSuggestions.NEXT_MESSAGE, conf, this.countUnread(conf));
+                  && applyFiltersForMessage(
+                      localToGlobal(conf, nextMessage), conf, nextMessage, FilterFlags.MESSAGES)) {
+                continue;
+              }
+              return new SessionState(CommandSuggestions.NEXT_MESSAGE, conf, countUnread(conf));
             }
-          } catch (MessageNotFoundException e) {
+          } catch (final MessageNotFoundException e) {
             // Probably deleted. Skip!
             //
             memberships.markAsRead(conf, nextMessage);
             continue;
           }
-        } catch (ObjectNotFoundException e) {
+        } catch (final ObjectNotFoundException e) {
           // Problems finding next message in this conference. Try
           // next conference
           //
@@ -568,37 +443,36 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
 
         // Get next conference with unread messages
         //
-        long confId =
+        final long confId =
             memberships.getNextConferenceWithUnreadMessages(conf, m_da.getConferenceManager());
 
         // Do we have any unread messages?
         //
-        if (confId == -1)
+        if (confId == -1) {
           return new SessionState(m_lastSuggestedCommand = CommandSuggestions.NO_ACTION, conf, 0);
+        }
         return new SessionState(
             m_lastSuggestedCommand = CommandSuggestions.NEXT_CONFERENCE,
-            this.getCurrentConferenceId(),
+            getCurrentConferenceId(),
             0);
       }
-    } catch (SQLException e) {
-      Logger.error(this, "Strange state!", e);
-      return new SessionState(CommandSuggestions.ERROR, -1, 0);
-    } catch (UnexpectedException e) {
+    } catch (final SQLException | UnexpectedException e) {
       Logger.error(this, "Strange state!", e);
       return new SessionState(CommandSuggestions.ERROR, -1, 0);
     }
   }
 
-  protected boolean applyFiltersForMessage(long message, long conference, int localnum, long filter)
+  protected boolean applyFiltersForMessage(
+      final long message, final long conference, final int localnum, final long filter)
       throws UnexpectedException {
     try {
-      MessageManager mm = m_da.getMessageManager();
+      final MessageManager mm = m_da.getMessageManager();
       boolean skip = false;
       MessageHeader mh = null;
       try {
         mh = mm.loadMessageHeader(message);
         skip = m_userContext.userMatchesFilter(mh.getAuthor(), filter);
-      } catch (ObjectNotFoundException e) {
+      } catch (final ObjectNotFoundException e) {
         // Message was deleted. Skip!
         //
         skip = true;
@@ -606,96 +480,115 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
 
       // So... Should we skip this message?
       //
-      if (!skip) return false;
+      if (!skip) {
+        return false;
+      }
 
       // Skip this message. Mark it as read.
       //
       try {
         m_userContext.getMemberships().markAsRead(conference, localnum);
-      } catch (ObjectNotFoundException e) {
+      } catch (final ObjectNotFoundException e) {
         // Not found when trying to mark it as read? I guess
         // it has disappeared then!
         //
         Logger.error(this, "Object not found when marking as read", e);
       }
       return true;
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
+  @Override
   public EventSource getEventSource() {
     return this;
   }
 
+  @Override
   public Envelope readLastMessage()
       throws ObjectNotFoundException, NoCurrentMessageException, UnexpectedException,
           AuthorizationException {
-    return this.innerReadMessage(null);
+    return innerReadMessage(null);
   }
 
+  @Override
   public MessageHeader getLastMessageHeader()
       throws ObjectNotFoundException, NoCurrentMessageException, UnexpectedException {
-    if (m_lastReadMessageId == -1) throw new NoCurrentMessageException();
+    if (m_lastReadMessageId == -1) {
+      throw new NoCurrentMessageException();
+    }
     try {
-      return m_da.getMessageManager().loadMessageHeader(this.m_lastReadMessageId);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+      return m_da.getMessageManager().loadMessageHeader(m_lastReadMessageId);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
+  @Override
   public Envelope readOriginalMessage()
       throws NoCurrentMessageException, NotAReplyException, ObjectNotFoundException,
           AuthorizationException, UnexpectedException {
     try {
-      if (m_lastReadMessageId == -1) throw new NoCurrentMessageException();
+      if (m_lastReadMessageId == -1) {
+        throw new NoCurrentMessageException();
+      }
 
       // Retrieve last message read and try to locate the message it replies to
       //
-      MessageManager mm = m_da.getMessageManager();
-      MessageHeader mh = mm.loadMessageHeader(m_lastReadMessageId);
-      long replyTo = mh.getReplyTo();
-      if (replyTo == -1) throw new NotAReplyException();
+      final MessageManager mm = m_da.getMessageManager();
+      final MessageHeader mh = mm.loadMessageHeader(m_lastReadMessageId);
+      final long replyTo = mh.getReplyTo();
+      if (replyTo == -1) {
+        throw new NotAReplyException();
+      }
 
       // Do we have the right to see it?
       //
-      this.assertMessageReadPermissions(replyTo);
+      assertMessageReadPermissions(replyTo);
 
       // We now know the message number. Go ahead and load it
       //
-      return this.innerReadMessage(replyTo);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+      return innerReadMessage(replyTo);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
+  @Override
   public short getActivity() {
     return m_currentActivity;
   }
 
-  public void setActivity(short a, boolean keepLastState) {
+  @Override
+  public void setActivity(final short a, final boolean keepLastState) {
     if (keepLastState) {
       m_lastActivity = m_currentActivity;
     }
     m_currentActivity = a;
   }
 
+  @Override
   public String getActivityString() {
     return m_freeActivityText;
   }
 
-  public void setActivityString(String a) {
+  @Override
+  public void setActivityString(final String a) {
     m_freeActivityText = a;
   }
 
+  @Override
   public long getLastObject() {
     return m_lastObject;
   }
 
-  public void setLastObject(long o) {
+  @Override
+  public void setLastObject(final long o) {
     m_lastObject = o;
   }
 
+  @Override
   public void restoreState() {
     m_currentActivity = m_lastActivity;
     m_lastActivity = Activities.AUTO;
@@ -703,78 +596,85 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
         -1; // Since we're no longer operating on an object, we're surely not fiddling with this one
   }
 
+  @Override
   public void clearStates() {
     m_lastActivity = Activities.AUTO;
     restoreState();
   }
 
-  public Envelope readMessage(MessageLocator message)
+  @Override
+  public Envelope readMessage(final MessageLocator message)
       throws ObjectNotFoundException, NoCurrentMessageException, UnexpectedException,
           AuthorizationException {
-    return this.innerReadMessage(this.resolveLocator(message));
+    return innerReadMessage(resolveLocator(message));
   }
 
+  @Override
   public Envelope readNextMessageInCurrentConference()
       throws NoMoreMessagesException, ObjectNotFoundException, UnexpectedException,
           AuthorizationException {
-    return this.readNextMessage(this.getCurrentConferenceId());
+    return readNextMessage(getCurrentConferenceId());
   }
 
-  public Envelope readNextMessage(long confId)
+  @Override
+  public Envelope readNextMessage(final long confId)
       throws NoMoreMessagesException, ObjectNotFoundException, UnexpectedException,
           AuthorizationException {
-    MembershipList memberships = m_userContext.getMemberships();
+    final MembershipList memberships = m_userContext.getMemberships();
     try {
       // Keep on trying until we've skipped all deleted messages
       //
       for (; ; ) {
-        int next = memberships.getNextMessageInConference(confId, m_da.getConferenceManager());
-        if (next == -1) throw new NoMoreMessagesException();
+        final int next =
+            memberships.getNextMessageInConference(confId, m_da.getConferenceManager());
+        if (next == -1) {
+          throw new NoMoreMessagesException();
+        }
         try {
-          this.pushReplies(confId, next);
-          return this.readMessage(new MessageLocator(confId, next));
-        } catch (ObjectNotFoundException e) {
+          pushReplies(confId, next);
+          return readMessage(new MessageLocator(confId, next));
+        } catch (final ObjectNotFoundException e) {
           // We hit a deleted message. Mark it as read
           // and continue.
           //
           memberships.markAsRead(confId, next);
         }
       }
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
-    } catch (NoCurrentMessageException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException | NoCurrentMessageException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
+  @Override
   public Envelope readNextReply()
       throws NoMoreMessagesException, ObjectNotFoundException, UnexpectedException,
           AuthorizationException {
     try {
-      long next = this.popReply();
-      if (next == -1) throw new NoMoreMessagesException();
-      this.pushReplies(next);
-      return this.innerReadMessage(next);
-    } catch (NoCurrentMessageException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+      final long next = popReply();
+      if (next == -1) {
+        throw new NoMoreMessagesException();
+      }
+      pushReplies(next);
+      return innerReadMessage(next);
+    } catch (final NoCurrentMessageException | SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
+  @Override
   public long createConference(
-      String fullname,
-      String keywords,
-      int permissions,
-      int nonmemberPermissions,
-      short visibility,
-      long replyConf)
+      final String fullname,
+      final String keywords,
+      final int permissions,
+      final int nonmemberPermissions,
+      final short visibility,
+      final long replyConf)
       throws UnexpectedException, AmbiguousNameException, DuplicateNameException,
           AuthorizationException {
-    this.checkRights(UserPermissions.CREATE_CONFERENCE);
+    checkRights(UserPermissions.CREATE_CONFERENCE);
     try {
-      long userId = this.getLoggedInUserId();
-      long confId =
+      final long userId = getLoggedInUserId();
+      final long confId =
           m_da.getConferenceManager()
               .addConference(
                   fullname,
@@ -792,161 +692,163 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
 
       // Flush membership cache
       //
-      this.reloadMemberships();
+      reloadMemberships();
       return confId;
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
-    } catch (AlreadyMemberException e) {
-      // Already member of a conference we just created? Huh?!
-      //
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
-    } catch (ObjectNotFoundException e) {
-      // User or newly created conference not found? Huh?!
-      //
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException | ObjectNotFoundException | AlreadyMemberException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
+  @Override
   public ConferenceListItem[] listConferencesByDate() throws UnexpectedException {
     try {
       return (ConferenceListItem[])
-          this.censorNames(m_da.getConferenceManager().listByDate(this.getLoggedInUserId()));
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
-    } catch (ObjectNotFoundException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+          censorNames(m_da.getConferenceManager().listByDate(getLoggedInUserId()));
+    } catch (final SQLException | ObjectNotFoundException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  /**
-   * Returns a list of conferences, sorted by their normalized name.
-   *
-   * @throws UnexpectedException
-   */
+  /** Returns a list of conferences, sorted by their normalized name. */
+  @Override
   public ConferenceListItem[] listConferencesByName() throws UnexpectedException {
     try {
       return (ConferenceListItem[])
-          this.censorNames(m_da.getConferenceManager().listByName(this.getLoggedInUserId()));
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
-    } catch (ObjectNotFoundException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+          censorNames(m_da.getConferenceManager().listByName(getLoggedInUserId()));
+    } catch (final SQLException | ObjectNotFoundException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public void gotoConference(long id)
+  @Override
+  public void gotoConference(final long id)
       throws UnexpectedException, ObjectNotFoundException, NotMemberException {
     // Going to the current conference?
     //
-    if (id == this.getCurrentConferenceId()) return;
+    if (id == getCurrentConferenceId()) {
+      return;
+    }
 
     // Trying to go to a protected conference?
     //
-    if (!this.isVisible(id)) throw new ObjectNotFoundException("id=" + id);
+    if (!isVisible(id)) {
+      throw new ObjectNotFoundException("id=" + id);
+    }
     try {
       // Are we members?
       //
-      if (!m_da.getMembershipManager().isMember(this.getLoggedInUserId(), id))
-        throw new NotMemberException(new Object[] {this.getCensoredName(id).getName()});
+      if (!m_da.getMembershipManager().isMember(getLoggedInUserId(), id)) {
+        throw new NotMemberException(new Object[] {getCensoredName(id).getName()});
+      }
 
       // All set! Go there!
       //
-      this.setCurrentConferenceId(id);
+      setCurrentConferenceId(id);
 
       // Clear reply stack
       //
       m_replyStack = null;
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
+  @Override
   public long gotoNextConference() throws NoMoreNewsException, UnexpectedException {
     try {
-      long nextId =
+      final long nextId =
           m_userContext
               .getMemberships()
               .getNextConferenceWithUnreadMessages(
-                  this.getCurrentConferenceId(), m_da.getConferenceManager());
+                  getCurrentConferenceId(), m_da.getConferenceManager());
 
       // Going nowhere or going to the same conference? We're outta here!
       //
-      if (nextId == -1 || nextId == this.getCurrentConferenceId()) throw new NoMoreNewsException();
+      if (nextId == -1 || nextId == getCurrentConferenceId()) {
+        throw new NoMoreNewsException();
+      }
 
       // Move focus...
       //
-      this.setCurrentConferenceId(nextId);
+      setCurrentConferenceId(nextId);
 
       // Clear reply stack
       //
       m_replyStack = null;
       return nextId;
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
-    } catch (ObjectNotFoundException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public MessageOccurrence storeMessage(long conf, UnstoredMessage msg)
+  @Override
+  public MessageOccurrence storeMessage(final long conf, final UnstoredMessage msg)
       throws ObjectNotFoundException, AuthorizationException, UnexpectedException {
-    return this.storeReplyAsMessage(conf, msg, -1L);
+    return storeReplyAsMessage(conf, msg, -1L);
   }
 
-  public void changeContactInfo(UserInfo ui)
+  @Override
+  public void changeContactInfo(final UserInfo ui)
       throws ObjectNotFoundException, UnexpectedException, AuthorizationException {
     try {
       // We're only allowed to change address of ourselves, unless
       // we hold the USER_ADMIN priv.
       //
-      long id = ui.getId();
-      if (id != this.getLoggedInUserId()) this.checkRights(UserPermissions.USER_ADMIN);
+      final long id = ui.getId();
+      if (id != getLoggedInUserId()) {
+        checkRights(UserPermissions.USER_ADMIN);
+      }
       m_da.getUserManager().changeContactInfo(ui);
-      this.sendEvent(id, new ReloadUserProfileEvent(id));
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+      sendEvent(id, new ReloadUserProfileEvent(id));
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public MessageOccurrence storeMail(long recipient, UnstoredMessage msg)
+  @Override
+  public MessageOccurrence storeMail(final long recipient, final UnstoredMessage msg)
       throws ObjectNotFoundException, UnexpectedException, AuthorizationException {
     return storeReplyAsMail(recipient, msg, -1L);
   }
 
+  @Override
   public MessageOccurrence storeReplyAsMessage(
-      long conference, UnstoredMessage msg, MessageLocator replyTo)
+      final long conference, final UnstoredMessage msg, final MessageLocator replyTo)
       throws ObjectNotFoundException, UnexpectedException, AuthorizationException,
           NoCurrentMessageException {
-    return storeReplyAsMessage(conference, msg, this.resolveLocator(replyTo).getGlobalId());
+    return storeReplyAsMessage(conference, msg, resolveLocator(replyTo).getGlobalId());
   }
 
   protected MessageOccurrence storeReplyAsMessage(
-      long author, long conference, UnstoredMessage msg, long replyTo)
+      final long author, final long conference, final UnstoredMessage msg, final long replyTo)
       throws ObjectNotFoundException, UnexpectedException, AuthorizationException {
     try {
       // If we're posting on behalf on someone else, we must hold the
       // POST_BY_PROXY privilege
       //
-      if (author != this.getLoggedInUserId()) this.checkRights(UserPermissions.POST_BY_PROXY);
-      MessageManager mm = m_da.getMessageManager();
-      UserInfo myinf = this.getLoggedInUser();
+      if (author != getLoggedInUserId()) {
+        checkRights(UserPermissions.POST_BY_PROXY);
+      }
+      final MessageManager mm = m_da.getMessageManager();
+      final UserInfo myinf = getLoggedInUser();
 
       // Check that we have the permission to write here. If it's a reply, we should
       // try check if we have the right to reply. It's ok to be able to reply without
       // being able to write. Great for conferences where users are only allowed to
       // reply to something posted by a moderator.
       //
-      if (replyTo == -1)
-        this.assertConferencePermission(author, conference, ConferencePermissions.WRITE_PERMISSION);
-      else
-        this.assertConferencePermission(author, conference, ConferencePermissions.REPLY_PERMISSION);
+      if (replyTo == -1) {
+        assertConferencePermission(author, conference, ConferencePermissions.WRITE_PERMISSION);
+      } else {
+        assertConferencePermission(author, conference, ConferencePermissions.REPLY_PERMISSION);
+      }
 
       // Store message in conference
       //
-      MessageOccurrence occ =
+      final MessageOccurrence occ =
           mm.addMessage(
               author,
-              this.getCensoredName(author).getName(),
+              getCensoredName(author).getName(),
               conference,
               replyTo,
               msg.getSubject(),
@@ -954,8 +856,9 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
 
       // Mark message as read unless the user is a narcissist.
       //
-      if ((myinf.getFlags1() & UserFlags.NARCISSIST) == 0)
-        this.markMessageAsRead(conference, occ.getLocalnum());
+      if ((myinf.getFlags1() & UserFlags.NARCISSIST) == 0) {
+        markMessageAsRead(conference, occ.getLocalnum());
+      }
 
       // Make this the "current" message
       //
@@ -965,53 +868,57 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
       // Notice that we post the event with OUR user id and not the author's.
       // I think that's the right thing to do...
       //
-      this.broadcastEvent(
+      broadcastEvent(
           new NewMessageEvent(
-              this.getLoggedInUserId(), occ.getConference(), occ.getLocalnum(), occ.getGlobalId()));
+              getLoggedInUserId(), occ.getConference(), occ.getLocalnum(), occ.getGlobalId()));
 
       m_stats.incNumPosted();
       return occ;
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
   protected MessageOccurrence storeReplyAsMessage(
-      long conference, UnstoredMessage msg, long replyTo)
+      final long conference, final UnstoredMessage msg, final long replyTo)
       throws ObjectNotFoundException, UnexpectedException, AuthorizationException {
-    return this.storeReplyAsMessage(this.getLoggedInUserId(), conference, msg, replyTo);
+    return storeReplyAsMessage(getLoggedInUserId(), conference, msg, replyTo);
   }
 
+  @Override
   public MessageOccurrence storeReplyAsMail(
-      long recipient, UnstoredMessage msg, MessageLocator replyTo)
+      final long recipient, final UnstoredMessage msg, final MessageLocator replyTo)
       throws ObjectNotFoundException, UnexpectedException, NoCurrentMessageException,
           AuthorizationException {
-    return storeReplyAsMail(recipient, msg, this.resolveLocator(replyTo).getGlobalId());
-  }
-
-  protected MessageOccurrence storeReplyAsMail(long recipient, UnstoredMessage msg, long replyTo)
-      throws ObjectNotFoundException, UnexpectedException, AuthorizationException {
-    return this.storeReplyAsMail(this.getLoggedInUserId(), recipient, msg, replyTo);
+    return storeReplyAsMail(recipient, msg, resolveLocator(replyTo).getGlobalId());
   }
 
   protected MessageOccurrence storeReplyAsMail(
-      long author, long recipient, UnstoredMessage msg, long replyTo)
+      final long recipient, final UnstoredMessage msg, final long replyTo)
+      throws ObjectNotFoundException, UnexpectedException, AuthorizationException {
+    return storeReplyAsMail(getLoggedInUserId(), recipient, msg, replyTo);
+  }
+
+  protected MessageOccurrence storeReplyAsMail(
+      final long author, final long recipient, final UnstoredMessage msg, final long replyTo)
       throws ObjectNotFoundException, UnexpectedException, AuthorizationException {
     try {
       // If we're posting on behalf on someone else, we must hold the
       // POST_BY_PROXY privilege
       //
-      if (author != this.getLoggedInUserId()) this.checkRights(UserPermissions.POST_BY_PROXY);
+      if (author != getLoggedInUserId()) {
+        checkRights(UserPermissions.POST_BY_PROXY);
+      }
 
-      MessageManager mm = m_da.getMessageManager();
-      UserInfo myinf = this.getLoggedInUser();
+      final MessageManager mm = m_da.getMessageManager();
+      final UserInfo myinf = getLoggedInUser();
 
       // Store message in recipient's mailbox
       //
-      MessageOccurrence occ =
+      final MessageOccurrence occ =
           mm.addMessage(
               author,
-              this.getCensoredName(author).getName(),
+              getCensoredName(author).getName(),
               recipient,
               replyTo,
               msg.getSubject(),
@@ -1021,26 +928,26 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
       // to mark a text as a mail, and to keep track of the original
       // recipient in case the occurrences are lost.
       //
-      String payload =
+      final String payload =
           MessageAttribute.constructUsernamePayload(
-              recipient, this.getCensoredName(recipient).getName());
+              recipient, getCensoredName(recipient).getName());
       mm.addMessageAttribute(occ.getGlobalId(), MessageAttributes.MAIL_RECIPIENT, payload);
 
       // Store a copy in sender's mailbox
       //
       if ((myinf.getFlags1() & UserFlags.KEEP_COPIES_OF_MAIL) != 0) {
-        MessageOccurrence copy =
+        final MessageOccurrence copy =
             mm.createMessageOccurrence(
                 occ.getGlobalId(),
                 MessageManager.ACTION_COPIED,
                 author,
-                this.getName(author).getName(),
+                getName(author).getName(),
                 author);
 
         // Mark copy as read unless the user is a narcissist.
         //
         if ((myinf.getFlags1() & UserFlags.NARCISSIST) == 0) {
-          this.markMessageAsRead(this.getLoggedInUserId(), copy.getLocalnum());
+          markMessageAsRead(getLoggedInUserId(), copy.getLocalnum());
         }
 
         // Make this the "current" message
@@ -1052,19 +959,20 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
       // Notice that we post the event with OUR user id and not the author's.
       // I think that's the right thing to do...
       //
-      this.sendEvent(
+      sendEvent(
           recipient,
           new NewMessageEvent(
-              this.getLoggedInUserId(), recipient, occ.getLocalnum(), occ.getGlobalId()));
+              getLoggedInUserId(), recipient, occ.getLocalnum(), occ.getGlobalId()));
 
       m_stats.incNumPosted();
       return occ;
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public MessageOccurrence storePresentation(UnstoredMessage msg, long object)
+  @Override
+  public MessageOccurrence storePresentation(final UnstoredMessage msg, long object)
       throws UnexpectedException, AuthorizationException, ObjectNotFoundException {
     try {
       // Permission checks: We have to be presenting ourselves, a conference
@@ -1072,21 +980,23 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
       // we're presenting a user) or CONFERENCE_ADMIN (in case of a conference)
       //
       if (-1L == object) {
-        object = this.getLoggedInUserId();
+        object = getLoggedInUserId();
       }
-      short kind = this.getObjectKind(object);
-      if (!this.canManipulateObject(object)) throw new AuthorizationException();
-      long conference =
+      final short kind = getObjectKind(object);
+      if (!canManipulateObject(object)) {
+        throw new AuthorizationException();
+      }
+      final long conference =
           m_da.getSettingManager()
               .getNumber(
                   kind == NameManager.CONFERENCE_KIND
                       ? SettingKeys.CONFERENCE_PRESENTATIONS
                       : SettingKeys.USER_PRESENTATIONS);
-      MessageManager mm = m_da.getMessageManager();
-      MessageOccurrence occ =
+      final MessageManager mm = m_da.getMessageManager();
+      final MessageOccurrence occ =
           mm.addMessage(
-              this.getLoggedInUserId(),
-              this.getCensoredName(this.getLoggedInUserId()).getName(),
+              getLoggedInUserId(),
+              getCensoredName(getLoggedInUserId()).getName(),
               conference,
               -1,
               msg.getSubject(),
@@ -1094,117 +1004,120 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
 
       // Mark as read (unless we're a narcissist)
       //
-      if ((this.getLoggedInUser().getFlags1() & UserFlags.NARCISSIST) == 0)
-        this.markMessageAsRead(conference, occ.getLocalnum());
-      this.broadcastEvent(
+      if ((getLoggedInUser().getFlags1() & UserFlags.NARCISSIST) == 0) {
+        markMessageAsRead(conference, occ.getLocalnum());
+      }
+      broadcastEvent(
           new NewMessageEvent(
-              this.getLoggedInUserId(), occ.getConference(), occ.getLocalnum(), occ.getGlobalId()));
-      this.m_da
-          .getMessageManager()
+              getLoggedInUserId(), occ.getConference(), occ.getLocalnum(), occ.getGlobalId()));
+      m_da.getMessageManager()
           .addMessageAttribute(
-              occ.getGlobalId(), MessageAttributes.PRESENTATION, new Long(object).toString());
+              occ.getGlobalId(), MessageAttributes.PRESENTATION, Long.toString(object));
 
       // Make this the "current" message
       //
       m_lastReadMessageId = occ.getGlobalId();
       return occ;
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public Envelope readTaggedMessage(short tag, long object)
+  @Override
+  public Envelope readTaggedMessage(final short tag, long object)
       throws UnexpectedException, ObjectNotFoundException, AuthorizationException {
     try {
       if (-1 == object) {
-        object = this.getLoggedInUserId();
+        object = getLoggedInUserId();
       }
-      return this.innerReadMessage(m_da.getMessageManager().getTaggedMessage(object, tag));
-    } catch (NoCurrentMessageException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+      return innerReadMessage(m_da.getMessageManager().getTaggedMessage(object, tag));
+    } catch (final NoCurrentMessageException | SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public void addMessageAttribute(long message, short attribute, String payload, boolean deleteOld)
+  @Override
+  public void addMessageAttribute(
+      final long message, final short attribute, final String payload, final boolean deleteOld)
       throws UnexpectedException, AuthorizationException {
     try {
-      MessageManager mm = m_da.getMessageManager();
+      final MessageManager mm = m_da.getMessageManager();
 
       // Determine conference of message
       //
-      long targetConf = mm.getFirstOccurrence(message).getConference();
+      final long targetConf = mm.getFirstOccurrence(message).getConference();
 
       // Check that we have the permission to write there.
       //
-      this.assertConferencePermission(targetConf, ConferencePermissions.WRITE_PERMISSION);
+      assertConferencePermission(targetConf, ConferencePermissions.WRITE_PERMISSION);
 
       // If this is the kind of attribute that only the owner can change, we need
       // to check that we own the text (or that we have enough privs).
       //
       if (MessageAttributes.onlyOwner[attribute]) {
-        if (mm.loadMessageHeader(message).getAuthor() != this.getLoggedInUserId())
+        if (mm.loadMessageHeader(message).getAuthor() != getLoggedInUserId()) {
           throw new AuthorizationException();
+        }
       }
 
       // Delete already existing "no comment"
       //
-      long user = this.getLoggedInUserId();
+      final long user = getLoggedInUserId();
       if (deleteOld) {
-        MessageAttribute[] attributes = mm.getMessageAttributes(message);
-        for (int i = 0; i < attributes.length; i++) {
-          if (attributes[i].getKind() == attribute && attributes[i].getUserId() == user)
-            mm.dropMessageAttribute(attributes[i].getId(), message);
+        final MessageAttribute[] attributes = mm.getMessageAttributes(message);
+        for (final MessageAttribute messageAttribute : attributes) {
+          if (messageAttribute.getKind() == attribute && messageAttribute.getUserId() == user) {
+            mm.dropMessageAttribute(messageAttribute.getId(), message);
+          }
         }
       }
 
       mm.addMessageAttribute(message, attribute, payload);
-    } catch (ObjectNotFoundException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final ObjectNotFoundException | SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public void storeNoComment(MessageLocator message)
+  @Override
+  public void storeNoComment(final MessageLocator message)
       throws UnexpectedException, ObjectNotFoundException, NoCurrentMessageException,
           AuthorizationException {
-    this.addMessageAttribute(
-        this.resolveLocator(message).getGlobalId(),
+    addMessageAttribute(
+        resolveLocator(message).getGlobalId(),
         MessageAttributes.NOCOMMENT,
         MessageAttribute.constructUsernamePayload(
-            this.getLoggedInUser().getId(), this.getLoggedInUser().getName().toString()),
+            getLoggedInUser().getId(), getLoggedInUser().getName().toString()),
         true);
   }
 
+  @Override
   public void createUser(
-      String userid,
-      String password,
-      String fullname,
-      String keywords,
-      String address1,
-      String address2,
-      String address3,
-      String address4,
-      String phoneno1,
-      String phoneno2,
-      String email1,
-      String email2,
-      String url,
-      String charset,
-      long flags1,
-      long flags2,
-      long flags3,
-      long flags4,
-      long rights)
+      final String userid,
+      final String password,
+      final String fullname,
+      final String keywords,
+      final String address1,
+      final String address2,
+      final String address3,
+      final String address4,
+      final String phoneno1,
+      final String phoneno2,
+      final String email1,
+      final String email2,
+      final String url,
+      final String charset,
+      final long flags1,
+      final long flags2,
+      final long flags3,
+      final long flags4,
+      final long rights)
       throws UnexpectedException, AmbiguousNameException, DuplicateNameException,
           AuthorizationException {
-    this.checkRights(UserPermissions.USER_ADMIN);
+    checkRights(UserPermissions.USER_ADMIN);
     try {
       // Create the user
       //
-      long id =
+      final long id =
           m_da.getUserManager()
               .addUser(
                   userid, password, fullname, keywords, address1, address2, address3, address4,
@@ -1214,43 +1127,45 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
       // Add default login script if requested
       //
       try {
-        String content = FileUtils.loadTextFromResource("firsttime.login");
+        final String content = FileUtils.loadTextFromResource("firsttime.login");
         m_da.getFileManager().store(id, ".login.cmd", content);
-      } catch (FileNotFoundException e) {
+      } catch (final FileNotFoundException e) {
         // No file specified? That's totally cool...
-      } catch (IOException e) {
-        throw new UnexpectedException(this.getLoggedInUserId(), e);
+      } catch (final IOException e) {
+        throw new UnexpectedException(getLoggedInUserId(), e);
       }
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
-    } catch (NoSuchAlgorithmException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException | NoSuchAlgorithmException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
+  @Override
   public void detach() {
     // Tell frontends to detach (hopefully they will)
     // TODO: Do we need to check that they actually do?
     //
-    this.postEvent(new DetachRequestEvent(m_userId, m_userId));
+    postEvent(new DetachRequestEvent(m_userId, m_userId));
   }
 
+  @Override
   public synchronized void close() throws UnexpectedException {
-    if (m_closed) return; // Closing twice is a noop!
+    if (m_closed) {
+      return; // Closing twice is a noop!
+    }
     try {
       // Send notification!
       //
       m_sessions.broadcastEvent(
           new UserAttendanceEvent(
-              m_userId, this.getUser(m_userId).getName(), UserAttendanceEvent.LOGOUT));
+              m_userId, getUser(m_userId).getName(), UserAttendanceEvent.LOGOUT));
 
       // Handle pending unreads
       //
-      this.applyUnreadMarkers();
+      applyUnreadMarkers();
 
       // Make sure all message markers are saved
       //
-      this.leaveConference();
+      leaveConference();
 
       // Save statistics
       //
@@ -1259,23 +1174,23 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
 
       // Save last login timestamp
       //
-      this.updateLastlogin();
+      updateLastlogin();
 
       // Unregister and kiss the world goodbye
       //
       UserContextFactory.getInstance().release(m_userId);
       m_sessions.unRegisterSession(this);
       m_closed = true;
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
-    } catch (ObjectNotFoundException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException | ObjectNotFoundException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public int countUnread(long conference) throws ObjectNotFoundException, UnexpectedException {
+  @Override
+  public int countUnread(final long conference)
+      throws ObjectNotFoundException, UnexpectedException {
     try {
-      MembershipList ml = m_userContext.getMemberships();
+      final MembershipList ml = m_userContext.getMemberships();
       int n = ml.countUnread(conference, m_da.getConferenceManager());
 
       // If we're filtering users, and the conference has a reasonable
@@ -1283,152 +1198,162 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
       // adjust as long as we find filtered messages.
       // This will not always yield an accurate result, but it will at
       // least prevent us from going into conferences where all messages
-      // are posted by M�ns^h^h^h^hfiltered users.
+      // are posted by Måns^h^h^h^hfiltered users.
       //
+      final int FILTER_ADJUST_THREASHOLD = 10;
       if (n > 0 && n <= FILTER_ADJUST_THREASHOLD && m_userContext.getFilterCache().size() > 0) {
         int localnum;
         for (; ; ) {
           localnum = ml.getNextMessageInConference(conference, m_da.getConferenceManager());
-          if (localnum == -1) break;
-          boolean mailbox = conference == this.getLoggedInUserId();
-          if (this.applyFiltersForMessage(
-              this.localToGlobal(conference, localnum),
+          if (localnum == -1) {
+            break;
+          }
+          final boolean mailbox = conference == getLoggedInUserId();
+          if (applyFiltersForMessage(
+              localToGlobal(conference, localnum),
               conference,
               localnum,
               mailbox ? FilterFlags.MAILS : FilterFlags.MESSAGES)) {
             --n;
             ml.markAsRead(conference, localnum);
-          } else break;
+          } else {
+            break;
+          }
         }
       }
       return n;
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public NameAssociation[] getAssociationsForPattern(String pattern) throws UnexpectedException {
-    try {
-      return this.censorNames(m_da.getNameManager().getAssociationsByPattern(pattern));
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
-    } catch (ObjectNotFoundException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
-    }
-  }
-
-  public NameAssociation[] getAssociationsForPatternAndKind(String pattern, short kind)
+  @Override
+  public NameAssociation[] getAssociationsForPattern(final String pattern)
       throws UnexpectedException {
     try {
-      return this.censorNames(m_da.getNameManager().getAssociationsByPatternAndKind(pattern, kind));
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
-    } catch (ObjectNotFoundException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+      return censorNames(m_da.getNameManager().getAssociationsByPattern(pattern));
+    } catch (final SQLException | ObjectNotFoundException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public boolean canManipulateObject(long object)
+  @Override
+  public NameAssociation[] getAssociationsForPatternAndKind(final String pattern, final short kind)
+      throws UnexpectedException {
+    try {
+      return censorNames(m_da.getNameManager().getAssociationsByPatternAndKind(pattern, kind));
+    } catch (final SQLException | ObjectNotFoundException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
+    }
+  }
+
+  @Override
+  public boolean canManipulateObject(final long object)
       throws ObjectNotFoundException, UnexpectedException {
-    short kind = this.getObjectKind(object);
-    UserInfo ui = this.getLoggedInUser();
+    final short kind = getObjectKind(object);
+    final UserInfo ui = getLoggedInUser();
     return ui.getId() == object
-        || this.hasPermissionInConference(object, ConferencePermissions.ADMIN_PERMISSION)
+        || hasPermissionInConference(object, ConferencePermissions.ADMIN_PERMISSION)
         || (kind == NameManager.USER_KIND && ui.hasRights(UserPermissions.USER_ADMIN))
         || (kind == NameManager.CONFERENCE_KIND && ui.hasRights(UserPermissions.CONFERENCE_ADMIN));
   }
 
-  public MessageOccurrence globalToLocalInConference(long conferenceId, long globalNum)
+  @Override
+  public MessageOccurrence globalToLocalInConference(final long conferenceId, final long globalNum)
       throws ObjectNotFoundException, UnexpectedException {
     try {
       return m_da.getMessageManager()
-          .getMostRelevantOccurrence(this.getLoggedInUserId(), conferenceId, globalNum);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+          .getMostRelevantOccurrence(getLoggedInUserId(), conferenceId, globalNum);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public MessageOccurrence globalToLocal(long globalNum)
+  @Override
+  public MessageOccurrence globalToLocal(final long globalNum)
       throws ObjectNotFoundException, UnexpectedException {
-    return this.globalToLocalInConference(m_currentConferenceId, globalNum);
+    return globalToLocalInConference(m_currentConferenceId, globalNum);
   }
 
-  public long localToGlobal(long conferenceId, int localnum)
+  @Override
+  public long localToGlobal(final long conferenceId, final int localnum)
       throws ObjectNotFoundException, UnexpectedException {
     try {
       return m_da.getMessageManager().getGlobalMessageId(conferenceId, localnum);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public long localToGlobalInCurrentConference(int localId)
+  @Override
+  public long localToGlobalInCurrentConference(final int localId)
       throws ObjectNotFoundException, UnexpectedException {
-    return localToGlobal(this.getCurrentConferenceId(), localId);
+    return localToGlobal(getCurrentConferenceId(), localId);
   }
 
-  public long getGlobalMessageId(MessageLocator textNumber)
+  @Override
+  public long getGlobalMessageId(final MessageLocator textNumber)
       throws ObjectNotFoundException, NoCurrentMessageException, UnexpectedException {
-    return this.resolveLocator(textNumber).getGlobalId();
+    return resolveLocator(textNumber).getGlobalId();
   }
 
-  public void copyMessage(long globalNum, long conferenceId)
+  @Override
+  public void copyMessage(final long globalNum, final long conferenceId)
       throws AuthorizationException, ObjectNotFoundException, UnexpectedException {
     try {
       // Check permissions.
       // TODO: Maybe a special copy-permission would be cool?
       //
-      long me = this.getLoggedInUserId();
+      final long me = getLoggedInUserId();
 
-      MembershipManager mbr = m_da.getMembershipManager();
-      if (!mbr.hasPermission(me, conferenceId, ConferencePermissions.WRITE_PERMISSION))
+      final MembershipManager mbr = m_da.getMembershipManager();
+      if (!mbr.hasPermission(me, conferenceId, ConferencePermissions.WRITE_PERMISSION)) {
         throw new AuthorizationException();
-      MessageManager mm = m_da.getMessageManager();
-      MessageOccurrence occ =
+      }
+      final MessageManager mm = m_da.getMessageManager();
+      final MessageOccurrence occ =
           mm.createMessageOccurrence(
-              globalNum,
-              MessageManager.ACTION_COPIED,
-              me,
-              this.getName(me).getName(),
-              conferenceId);
+              globalNum, MessageManager.ACTION_COPIED, me, getName(me).getName(), conferenceId);
 
       // Mark copy as read (unless we're narcissists)
       //
-      if ((this.getLoggedInUser().getFlags1() & UserFlags.NARCISSIST) == 0)
-        this.markMessageAsRead(conferenceId, occ.getLocalnum());
+      if ((getLoggedInUser().getFlags1() & UserFlags.NARCISSIST) == 0) {
+        markMessageAsRead(conferenceId, occ.getLocalnum());
+      }
 
       // Notify the rest of the world that there is a new message!
       //
-      this.broadcastEvent(new NewMessageEvent(me, conferenceId, occ.getLocalnum(), globalNum));
+      broadcastEvent(new NewMessageEvent(me, conferenceId, occ.getLocalnum(), globalNum));
       m_stats.incNumCopies();
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public long getThreadIdForMessage(MessageLocator ml)
+  @Override
+  public long getThreadIdForMessage(final MessageLocator ml)
       throws MessageNotFoundException, UnexpectedException {
     if (!ml.isValid()) {
       throw new MessageNotFoundException();
     }
     try {
       if (-1 == ml.getGlobalId()) {
-        ml.setGlobalId(this.localToGlobal(this.getCurrentConferenceId(), ml.getLocalnum()));
+        ml.setGlobalId(localToGlobal(getCurrentConferenceId(), ml.getLocalnum()));
       }
       return m_da.getMessageManager().getThreadIdForMessage(ml.getGlobalId());
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
-    } catch (ObjectNotFoundException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException | ObjectNotFoundException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public void deleteMessageInCurrentConference(int localNum)
+  @Override
+  public void deleteMessageInCurrentConference(final int localNum)
       throws AuthorizationException, ObjectNotFoundException, UnexpectedException {
-    deleteMessage(localNum, this.getCurrentConferenceId());
+    deleteMessage(localNum, getCurrentConferenceId());
   }
 
-  public void deleteMessage(int localNum, long conference)
+  @Override
+  public void deleteMessage(final int localNum, final long conference)
       throws AuthorizationException, ObjectNotFoundException, UnexpectedException {
     if (!canDeleteOccurrence(localNum, conference)) {
       throw new AuthorizationException();
@@ -1436,45 +1361,45 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
 
     try {
       m_da.getMessageManager().dropMessageOccurrence(localNum, conference);
-      this.broadcastEvent(new MessageDeletedEvent(this.getLoggedInUserId(), conference));
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+      broadcastEvent(new MessageDeletedEvent(getLoggedInUserId(), conference));
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  private boolean canDeleteOccurrence(int localNum, long conference)
+  private boolean canDeleteOccurrence(final int localNum, final long conference)
       throws UnexpectedException, ObjectNotFoundException {
     try {
       return (m_da.getMessageManager().loadMessageOccurrence(conference, localNum).getUser().getId()
-              == this.getLoggedInUserId())
-          || this.hasPermissionInConference(
+              == getLoggedInUserId())
+          || hasPermissionInConference(
               conference,
               ConferencePermissions.DELETE_PERMISSION | ConferencePermissions.ADMIN_PERMISSION);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  private void moveMessage(int localNum, long sourceConfId, long destConfId)
+  private void moveMessage(final int localNum, final long sourceConfId, final long destConfId)
       throws AuthorizationException, ObjectNotFoundException, UnexpectedException {
     try {
       // Now, to move a message you need to be able to remove it from it's original location
       // and place it in the new location.
       //
-      long me = this.getLoggedInUserId();
-      if (!(this.hasPermissionInConference(destConfId, ConferencePermissions.WRITE_PERMISSION)
-          && this.canDeleteOccurrence(localNum, sourceConfId))) {
+      final long me = getLoggedInUserId();
+      if (!(hasPermissionInConference(destConfId, ConferencePermissions.WRITE_PERMISSION)
+          && canDeleteOccurrence(localNum, sourceConfId))) {
         throw new AuthorizationException();
       }
-      MessageManager mm = m_da.getMessageManager();
-      long globId = this.localToGlobal(sourceConfId, localNum);
+      final MessageManager mm = m_da.getMessageManager();
+      final long globId = localToGlobal(sourceConfId, localNum);
 
       // Start by creating the new occurrence
       // We must retain the message occurrence, as we'll be using it in the broadcast event.
       //
-      MessageOccurrence occ =
+      final MessageOccurrence occ =
           mm.createMessageOccurrence(
-              globId, MessageManager.ACTION_MOVED, me, this.getName(me).getName(), destConfId);
+              globId, MessageManager.ACTION_MOVED, me, getName(me).getName(), destConfId);
 
       // Drop the original occurrence
       //
@@ -1483,72 +1408,77 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
       // Tag the message with an ATTR_MOVEDFROM attribute containing the source conference id.
       //
       mm.addMessageAttribute(
-          globId, MessageAttributes.MOVEDFROM, this.getCensoredName(sourceConfId).getName());
+          globId, MessageAttributes.MOVEDFROM, getCensoredName(sourceConfId).getName());
 
       // Hello, world!
       //
-      this.broadcastEvent(
-          new NewMessageEvent(me, destConfId, occ.getLocalnum(), occ.getGlobalId()));
-      this.broadcastEvent(new MessageDeletedEvent(me, this.getCurrentConferenceId()));
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+      broadcastEvent(new NewMessageEvent(me, destConfId, occ.getLocalnum(), occ.getGlobalId()));
+      broadcastEvent(new MessageDeletedEvent(me, getCurrentConferenceId()));
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public void moveMessage(long messageId, long destConfId)
+  @Override
+  public void moveMessage(final long messageId, final long destConfId)
       throws AuthorizationException, ObjectNotFoundException, UnexpectedException {
     // I'm lazy, I'll just re-use the old move-methods...
-    MessageOccurrence originalOcc;
+    final MessageOccurrence originalOcc;
     try {
       originalOcc = m_da.getMessageManager().getOriginalMessageOccurrence(messageId);
       moveMessage(originalOcc.getLocalnum(), originalOcc.getConference(), destConfId);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
+  @Override
   public long getCurrentMessage() throws NoCurrentMessageException {
-    if (m_lastReadMessageId == -1) throw new NoCurrentMessageException();
+    if (m_lastReadMessageId == -1) {
+      throw new NoCurrentMessageException();
+    }
     return m_lastReadMessageId;
   }
 
+  @Override
   public MessageOccurrence getCurrentMessageOccurrence()
       throws NoCurrentMessageException, UnexpectedException {
     try {
       return m_da.getMessageManager()
           .getMostRelevantOccurrence(
-              this.getLoggedInUserId(), m_currentConferenceId, this.getCurrentMessage());
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
-    } catch (ObjectNotFoundException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+              getLoggedInUserId(), m_currentConferenceId, getCurrentMessage());
+    } catch (final SQLException | ObjectNotFoundException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public MessageOccurrence getMostRelevantOccurrence(long conferenceId, long messageId)
+  @Override
+  public MessageOccurrence getMostRelevantOccurrence(final long conferenceId, final long messageId)
       throws ObjectNotFoundException, UnexpectedException {
     try {
       return m_da.getMessageManager()
-          .getMostRelevantOccurrence(this.getLoggedInUserId(), conferenceId, messageId);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+          .getMostRelevantOccurrence(getLoggedInUserId(), conferenceId, messageId);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public MessageOccurrence getOriginalMessageOccurrence(long messageId)
+  @Override
+  public MessageOccurrence getOriginalMessageOccurrence(final long messageId)
       throws ObjectNotFoundException, UnexpectedException {
     try {
       return m_da.getMessageManager().getOriginalMessageOccurrence(messageId);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public Name signup(long conferenceId)
+  @Override
+  public Name signup(final long conferenceId)
       throws ObjectNotFoundException, AlreadyMemberException, UnexpectedException,
           AuthorizationException {
     try {
-      long user = this.getLoggedInUserId();
+      final long user = getLoggedInUserId();
 
       // Add membership (and grant all permissions)
       //
@@ -1556,50 +1486,47 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
 
       // Flush membership cache
       //
-      this.reloadMemberships();
+      reloadMemberships();
 
       // Return full name of conference
       //
-      return this.getCensoredName(conferenceId);
-    } catch (AlreadyMemberException e) {
-      throw new AlreadyMemberException(new Object[] {this.getCensoredName(conferenceId).getName()});
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+      return getCensoredName(conferenceId);
+    } catch (final AlreadyMemberException e) {
+      throw new AlreadyMemberException(new Object[] {getCensoredName(conferenceId).getName()});
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
+  @Override
   public Name[] signupForAllConferences() throws UnexpectedException, ObjectNotFoundException {
-    long uid = this.getLoggedInUserId();
-    MembershipManager mm = m_da.getMembershipManager();
+    final long uid = getLoggedInUserId();
+    final MembershipManager mm = m_da.getMembershipManager();
 
     // Start by retrieving a list of all conferences
     //
-    long[] allconfs;
-    MembershipInfo[] memberOf;
+    final long[] allconfs;
+    final MembershipInfo[] memberOf;
     try {
       allconfs = m_da.getConferenceManager().getConferenceIdsByPattern("%");
       memberOf = mm.listMembershipsByUser(uid);
-    } catch (SQLException e) {
-      throw new UnexpectedException(uid, e);
-    } catch (ObjectNotFoundException e) {
-      // Throw a VERY unexpected exception..
-      //
+    } catch (final SQLException | ObjectNotFoundException e) {
       throw new UnexpectedException(uid, e);
     }
 
     // Put them in a better structure ..
     //
-    HashSet<Long> s = new HashSet<Long>();
-    for (int i = 0; i < allconfs.length; ++i) {
-      s.add(allconfs[i]);
+    final HashSet<Long> s = new HashSet<>();
+    for (final long allconf : allconfs) {
+      s.add(allconf);
     }
 
     // .. and clean out anything the user is already a member of.
     //
-    for (int i = 0; i < memberOf.length; ++i) {
+    for (final MembershipInfo membershipInfo : memberOf) {
       // if (s.contains(joined[i].getConference()))
       // {
-      s.remove(memberOf[i].getConference());
+      s.remove(membershipInfo.getConference());
       // }
     }
 
@@ -1607,14 +1534,14 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
     // every exception. This should be more efficient than verifying visibility and rights
     // for every conference. Prove me wrong :-)
     //
-    ArrayList<Name> joins = new ArrayList<Name>(s.size());
-    Iterator<Long> it = s.iterator();
+    final ArrayList<Name> joins = new ArrayList<>(s.size());
+    final Iterator<Long> it = s.iterator();
     while (it.hasNext()) {
       try {
-        long l = it.next();
+        final long l = it.next();
         mm.signup(uid, l, 0, 0, 0);
         joins.add(getCensoredName(l));
-      } catch (Exception e) {
+      } catch (final Exception e) {
         // Don't bother differentiating between types, all we care about is that the
         // signup failed.
       }
@@ -1623,107 +1550,113 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
     // Finally, refresh membership list and return the number of joined conferences.
     //
     try {
-      this.reloadMemberships();
-    } catch (SQLException e) {
+      reloadMemberships();
+    } catch (final SQLException e) {
       throw new UnexpectedException(uid, e);
     }
-    Name[] joined = new Name[joins.size()];
+    final Name[] joined = new Name[joins.size()];
     joins.toArray(joined);
     return joined;
   }
 
-  public Name signoff(long conferenceId)
+  @Override
+  public Name signoff(final long conferenceId)
       throws ObjectNotFoundException, UnexpectedException, NotMemberException {
-    long userId = this.getLoggedInUserId();
+    final long userId = getLoggedInUserId();
     try {
       if (!m_da.getMembershipManager().isMember(userId, conferenceId)) {
-        throw new NotMemberException(new Object[] {this.getCensoredName(conferenceId).getName()});
+        throw new NotMemberException(new Object[] {getCensoredName(conferenceId).getName()});
       }
       m_da.getMembershipManager().signoff(userId, conferenceId);
-      this.reloadMemberships();
-      return this.getCensoredName(conferenceId);
-    } catch (SQLException e) {
+      reloadMemberships();
+      return getCensoredName(conferenceId);
+    } catch (final SQLException e) {
       throw new UnexpectedException(userId, e);
     }
     // Return full name of conference
     //
   }
 
+  @Override
   public int signoffAllConferences() throws ObjectNotFoundException, UnexpectedException {
     // First, determine which conferences the user is a member of.
     //
-    MembershipManager mm = m_da.getMembershipManager();
-    long uid = this.getLoggedInUserId();
-    MembershipInfo mo[];
+    final MembershipManager mm = m_da.getMembershipManager();
+    final long uid = getLoggedInUserId();
+    final MembershipInfo[] mo;
     try {
       mo = mm.listMembershipsByUser(uid);
-    } catch (SQLException e) {
+    } catch (final SQLException e) {
       throw new UnexpectedException(uid, e);
     }
 
     // Walk through the array, swallowing any exception silently
     //
     int cnt = 0;
-    for (int i = 0; i < mo.length; ++i) {
+    for (final MembershipInfo membershipInfo : mo) {
       try {
         // Can't sign off mailbox.
         //
-        if (uid == mo[i].getConference()) continue;
+        if (uid == membershipInfo.getConference()) {
+          continue;
+        }
 
-        mm.signoff(uid, mo[i].getConference());
+        mm.signoff(uid, membershipInfo.getConference());
         ++cnt;
-      } catch (Exception e) {
+      } catch (final Exception e) {
+        // Intentionally ignoring exception
       }
     }
 
     // Reload the memberships (should be quick by now) and return count.
     //
     try {
-      this.reloadMemberships();
-    } catch (SQLException e) {
+      reloadMemberships();
+    } catch (final SQLException e) {
       throw new UnexpectedException(uid, e);
     }
     return cnt;
   }
 
-  public long prioritizeConference(long conference, long targetconference)
+  @Override
+  public long prioritizeConference(final long conference, final long targetconference)
       throws ObjectNotFoundException, UnexpectedException, NotMemberException {
-    long user = this.getLoggedInUserId();
+    final long user = getLoggedInUserId();
     try {
       // Check if we're actually member of the two given conferences.
       //
       if (!m_da.getMembershipManager().isMember(user, conference)) {
-        throw new NotMemberException(new Object[] {this.getCensoredName(conference).getName()});
+        throw new NotMemberException(new Object[] {getCensoredName(conference).getName()});
       }
       if (!m_da.getMembershipManager().isMember(user, targetconference)) {
-        throw new NotMemberException(
-            new Object[] {this.getCensoredName(targetconference).getName()});
+        throw new NotMemberException(new Object[] {getCensoredName(targetconference).getName()});
       }
 
       // Shufflepuck caf�
       //
-      long result =
+      final long result =
           m_da.getMembershipManager().prioritizeConference(user, conference, targetconference);
 
       // Flush membership cache
       //
-      this.reloadMemberships();
+      reloadMemberships();
       return result;
-    } catch (SQLException e) {
+    } catch (final SQLException e) {
       throw new UnexpectedException(user, e);
     }
   }
 
+  @Override
   public void autoPrioritizeConferences() throws UnexpectedException {
     try {
-      ConferenceManager cm = this.m_da.getConferenceManager();
-      MembershipManager mm = this.m_da.getMembershipManager();
-      MembershipInfo[] mi = mm.listMembershipsByUser(this.getLoggedInUserId());
+      final ConferenceManager cm = m_da.getConferenceManager();
+      final MembershipManager mm = m_da.getMembershipManager();
+      final MembershipInfo[] mi = mm.listMembershipsByUser(getLoggedInUserId());
 
       // Put the data in a sortable wrapper and place in a better container.
       //
-      List<SortableMembershipInfo> newOrder = new ArrayList<SortableMembershipInfo>(mi.length);
-      for (int i = 0; i < mi.length; ++i) {
+      final List<SortableMembershipInfo> newOrder = new ArrayList<>(mi.length);
+      for (final MembershipInfo membershipInfo : mi) {
         // FIXME: If we experience a performance bottleneck (which I doubt), change
         // this to start by populating a hash table with conference ID + parent
         // count (one call, bulk transfer of n rows) instead of n separate calls.
@@ -1732,64 +1665,74 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
         // database doesn't buckle under the load.
         //
         newOrder.add(
-            new SortableMembershipInfo(mi[i], cm.countParentsForConference(mi[i].getConference())));
+            new SortableMembershipInfo(
+                membershipInfo, cm.countParentsForConference(membershipInfo.getConference())));
       }
       java.util.Collections.sort(newOrder);
 
       // OK, we're now sorted according to the Algorithm of Darkness. Walk the list,
       // writing new priorities back to the database.
       //
-      Iterator<SortableMembershipInfo> it = newOrder.listIterator();
+      final Iterator<SortableMembershipInfo> it = newOrder.listIterator();
       for (int i = 1; it.hasNext(); ++i) {
-        mm.updatePriority(i, this.getLoggedInUserId(), it.next().getId());
+        mm.updatePriority(i, getLoggedInUserId(), it.next().getId());
       }
-    } catch (Exception e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final Exception e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public UserInfo getUser(long userId) throws ObjectNotFoundException, UnexpectedException {
+  @Override
+  public UserInfo getUser(final long userId) throws ObjectNotFoundException, UnexpectedException {
     try {
       return m_da.getUserManager().loadUser(userId);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public ConferenceInfo getConference(long conferenceId)
+  @Override
+  public ConferenceInfo getConference(final long conferenceId)
       throws ObjectNotFoundException, UnexpectedException {
     try {
-      if (!this.isVisible(conferenceId)) throw new ObjectNotFoundException("id=" + conferenceId);
+      if (!isVisible(conferenceId)) {
+        throw new ObjectNotFoundException("id=" + conferenceId);
+      }
       return m_da.getConferenceManager().loadConference(conferenceId);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public NamedObject getNamedObject(long id) throws ObjectNotFoundException, UnexpectedException {
-    if (!this.isVisible(id)) throw new ObjectNotFoundException("id=" + id);
+  @Override
+  public NamedObject getNamedObject(final long id)
+      throws ObjectNotFoundException, UnexpectedException {
+    if (!isVisible(id)) {
+      throw new ObjectNotFoundException("id=" + id);
+    }
     try {
       // First, try users
       //
-      return this.getUser(id);
-    } catch (ObjectNotFoundException e) {
+      return getUser(id);
+    } catch (final ObjectNotFoundException e) {
       // Not a user. Try conference!
       //
-      return this.getConference(id);
+      return getConference(id);
     }
   }
 
-  public NameAssociation[] listMemberships(long userId)
+  @Override
+  public NameAssociation[] listMemberships(final long userId)
       throws ObjectNotFoundException, UnexpectedException {
     try {
-      MembershipInfo[] mi = m_da.getMembershipManager().listMembershipsByUser(userId);
-      int top = mi.length;
-      NameAssociation[] answer = new NameAssociation[top];
+      final MembershipInfo[] mi = m_da.getMembershipManager().listMembershipsByUser(userId);
+      final int top = mi.length;
+      final NameAssociation[] answer = new NameAssociation[top];
       for (int idx = 0; idx < top; ++idx) {
-        long conf = mi[idx].getConference();
+        final long conf = mi[idx].getConference();
         try {
-          answer[idx] = new NameAssociation(conf, this.getCensoredName(conf));
-        } catch (ObjectNotFoundException e) {
+          answer[idx] = new NameAssociation(conf, getCensoredName(conf));
+        } catch (final ObjectNotFoundException e) {
           // Probably deleted while we were listing
           //
           answer[idx] =
@@ -1797,111 +1740,128 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
                   conf, new Name("???", Visibilities.PUBLIC, NameManager.CONFERENCE_KIND));
         }
       }
-      return this.censorNames(answer);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+      return censorNames(answer);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public MembershipInfo[] listConferenceMembers(long confId)
+  @Override
+  public MembershipInfo[] listConferenceMembers(final long confId)
       throws ObjectNotFoundException, UnexpectedException {
     try {
       return m_da.getMembershipManager().listMembershipsByConference(confId);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public NameAssociation[] listMembersByConference(long confId)
+  @Override
+  public NameAssociation[] listMembersByConference(final long confId)
       throws ObjectNotFoundException, UnexpectedException {
-    MembershipInfo[] mi = this.listConferenceMembers(confId);
-    NameAssociation[] s = new NameAssociation[mi.length];
-    for (int i = 0; i < mi.length; ++i)
-      s[i] = new NameAssociation(mi[i].getUser(), this.getName(mi[i].getUser()));
+    final MembershipInfo[] mi = listConferenceMembers(confId);
+    final NameAssociation[] s = new NameAssociation[mi.length];
+    for (int i = 0; i < mi.length; ++i) {
+      s[i] = new NameAssociation(mi[i].getUser(), getName(mi[i].getUser()));
+    }
     return s;
   }
 
-  public Name getName(long id) throws ObjectNotFoundException, UnexpectedException {
-    return this.getCensoredName(id);
+  @Override
+  public Name getName(final long id) throws ObjectNotFoundException, UnexpectedException {
+    return getCensoredName(id);
   }
 
-  public Name[] getNames(long[] ids) throws ObjectNotFoundException, UnexpectedException {
-    int top = ids.length;
-    Name[] names = new Name[top];
-    for (int idx = 0; idx < top; ++idx) names[idx] = this.getName(ids[idx]);
+  @Override
+  public Name[] getNames(final long[] ids) throws ObjectNotFoundException, UnexpectedException {
+    final int top = ids.length;
+    final Name[] names = new Name[top];
+    for (int idx = 0; idx < top; ++idx) {
+      names[idx] = getName(ids[idx]);
+    }
     return names;
   }
 
+  @Override
   public String getDebugString() {
-    ByteArrayOutputStream s = new ByteArrayOutputStream();
+    final ByteArrayOutputStream s = new ByteArrayOutputStream();
     m_userContext.getMemberships().printDebugInfo(new PrintStream(s));
     return s.toString();
   }
 
-  public void markAsUnreadAtLogoutInCurrentConference(int localnum) throws UnexpectedException {
-    this.innerMarkAsUnreadAtLogoutInCurrentConference(localnum);
-    this.saveUnreadMarkers();
+  public void markAsUnreadAtLogoutInCurrentConference(final int localnum)
+      throws UnexpectedException {
+    innerMarkAsUnreadAtLogoutInCurrentConference(localnum);
+    saveUnreadMarkers();
   }
 
-  public void markAsUnreadAtLogout(MessageLocator message)
+  @Override
+  public void markAsUnreadAtLogout(final MessageLocator message)
       throws UnexpectedException, NoCurrentMessageException, ObjectNotFoundException {
-    this.innerMarkAsUnreadAtLogout(this.resolveLocator(message).getGlobalId());
-    this.saveUnreadMarkers();
+    innerMarkAsUnreadAtLogout(resolveLocator(message).getGlobalId());
+    saveUnreadMarkers();
   }
 
-  public int markThreadAsUnread(long root, boolean immediate)
-      throws ObjectNotFoundException, UnexpectedException, NoCurrentMessageException {
-    ReadLogItem old = null;
-    if (immediate) {
-      old = this.m_pendingUnreads;
-      this.m_pendingUnreads = null;
-    }
-    int n = this.markThreadAsUnread(root);
-    if (immediate) {
-      this.applyUnreadMarkers();
-      this.m_pendingUnreads = old;
-    }
-    return n;
-  }
-
-  public int markThreadAsUnread(long root) throws ObjectNotFoundException, UnexpectedException {
-    int n = this.performTreeOperation(root, new MarkAsUnreadOperation());
-    this.saveUnreadMarkers();
-    return n;
-  }
-
-  public int markSubjectAsUnread(String subject, boolean localOnly, boolean immediate)
+  @Override
+  public int markThreadAsUnread(final long root, final boolean immediate)
       throws ObjectNotFoundException, UnexpectedException {
     ReadLogItem old = null;
     if (immediate) {
-      old = this.m_pendingUnreads;
-      this.m_pendingUnreads = null;
+      old = m_pendingUnreads;
+      m_pendingUnreads = null;
     }
-    int n = this.markSubjectAsUnread(subject, localOnly);
+    final int n = markThreadAsUnread(root);
     if (immediate) {
-      this.applyUnreadMarkers();
-      this.m_pendingUnreads = old;
+      applyUnreadMarkers();
+      m_pendingUnreads = old;
     }
     return n;
   }
 
-  public int markSubjectAsUnread(String subject, boolean localOnly)
+  @Override
+  public int markThreadAsUnread(final long root)
       throws ObjectNotFoundException, UnexpectedException {
-    int n =
+    final int n = performTreeOperation(root, new MarkAsUnreadOperation());
+    saveUnreadMarkers();
+    return n;
+  }
+
+  @Override
+  public int markSubjectAsUnread(
+      final String subject, final boolean localOnly, final boolean immediate)
+      throws ObjectNotFoundException, UnexpectedException {
+    ReadLogItem old = null;
+    if (immediate) {
+      old = m_pendingUnreads;
+      m_pendingUnreads = null;
+    }
+    final int n = markSubjectAsUnread(subject, localOnly);
+    if (immediate) {
+      applyUnreadMarkers();
+      m_pendingUnreads = old;
+    }
+    return n;
+  }
+
+  @Override
+  public int markSubjectAsUnread(final String subject, final boolean localOnly)
+      throws ObjectNotFoundException, UnexpectedException {
+    final int n =
         localOnly
-            ? this.performOperationBySubjectInConference(subject, new MarkAsUnreadOperation())
-            : this.performOperationBySubject(subject, new MarkAsUnreadOperation());
-    this.saveUnreadMarkers();
+            ? performOperationBySubjectInConference(subject, new MarkAsUnreadOperation())
+            : performOperationBySubject(subject, new MarkAsUnreadOperation());
+    saveUnreadMarkers();
     return n;
   }
 
-  public void changeUnread(int nUnread, long conference)
+  @Override
+  public void changeUnread(final int nUnread, final long conference)
       throws ObjectNotFoundException, UnexpectedException {
     try {
       // Update message markers
       //
-      ConferenceManager cm = m_da.getConferenceManager();
-      ConferenceInfo ci = cm.loadConference(conference);
+      final ConferenceManager cm = m_da.getConferenceManager();
+      final ConferenceInfo ci = cm.loadConference(conference);
       int high = ci.getLastMessage();
       high = Math.max(0, high - nUnread);
       m_userContext.getMemberships().changeRead(ci.getId(), ci.getFirstMessage(), high);
@@ -1910,128 +1870,132 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
       //
       m_replyStack = null;
 
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public void changeUnread(int nUnread) throws ObjectNotFoundException, UnexpectedException {
-    changeUnread(nUnread, this.getCurrentConferenceId());
+  @Override
+  public void changeUnread(final int nUnread) throws ObjectNotFoundException, UnexpectedException {
+    changeUnread(nUnread, getCurrentConferenceId());
   }
 
-  public void changeUnreadInAllConfs(int nUnread)
+  @Override
+  public void changeUnreadInAllConfs(final int nUnread)
       throws ObjectNotFoundException, UnexpectedException {
     try {
-      ConferenceManager cm = m_da.getConferenceManager();
-      MembershipList ml = m_userContext.getMemberships();
-      MembershipManager mm = this.m_da.getMembershipManager();
-      MembershipInfo[] mi = mm.listMembershipsByUser(this.getLoggedInUserId());
+      final ConferenceManager cm = m_da.getConferenceManager();
+      final MembershipList ml = m_userContext.getMemberships();
+      final MembershipManager mm = m_da.getMembershipManager();
+      final MembershipInfo[] mi = mm.listMembershipsByUser(getLoggedInUserId());
 
-      for (MembershipInfo m : mi) {
+      for (final MembershipInfo m : mi) {
         try {
-          ConferenceInfo ci = cm.loadConference(m.getConference());
+          final ConferenceInfo ci = cm.loadConference(m.getConference());
           int high = ci.getLastMessage();
           high = Math.max(0, high - nUnread);
           ml.changeRead(ci.getId(), ci.getFirstMessage(), high);
-        } catch (Exception e) {
+        } catch (final Exception e) {
           // When does this happen? If the DB goes away? If a conference is
           // deleted while we run? If the user signs off a conference in another
           // session while running this?
         }
       }
       m_replyStack = null;
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public MembershipListItem[] listNewsFor(long userId) throws UnexpectedException {
+  @Override
+  public MembershipListItem[] listNewsFor(final long userId) throws UnexpectedException {
     try {
-      ConferenceManager cm = m_da.getConferenceManager();
-      MembershipManager mm = m_da.getMembershipManager();
-      MembershipInfo[] m = mm.listMembershipsByUser(userId);
-      MembershipList ml = new MembershipList(m);
-      int top = m.length;
-      List<MembershipListItem> list = new ArrayList<MembershipListItem>(top);
-      for (int i = 0; i < top; ++i) {
+      final ConferenceManager cm = m_da.getConferenceManager();
+      final MembershipManager mm = m_da.getMembershipManager();
+      final MembershipInfo[] m = mm.listMembershipsByUser(userId);
+      final MembershipList ml = new MembershipList(m);
+      final int top = m.length;
+      final List<MembershipListItem> list = new ArrayList<>(top);
+      for (final MembershipInfo membershipInfo : m) {
         try {
-          MembershipInfo item = m[i];
-          long confId = item.getConference();
-          if (!this.isVisible(confId)) {
+          final long confId = membershipInfo.getConference();
+          if (!isVisible(confId)) {
             continue;
           }
-          int n = ml.countUnread(confId, cm);
+          final int n = ml.countUnread(confId, cm);
           if (0 < n) {
             list.add(
-                new MembershipListItem(
-                    new NameAssociation(confId, this.getCensoredName(confId)), n));
+                new MembershipListItem(new NameAssociation(confId, getCensoredName(confId)), n));
           }
-        } catch (ObjectNotFoundException e) {
+        } catch (final ObjectNotFoundException e) {
           // Ignore
         }
       }
-      MembershipListItem[] answer = new MembershipListItem[list.size()];
+      final MembershipListItem[] answer = new MembershipListItem[list.size()];
       list.toArray(answer);
       return answer;
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
-    } catch (ObjectNotFoundException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException | ObjectNotFoundException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
+  @Override
   public MembershipListItem[] listNews() throws UnexpectedException {
-    MembershipList memberships = m_userContext.getMemberships();
-    MembershipInfo[] m = memberships.getMemberships();
-    int top = m.length;
-    List<MembershipListItem> list = new ArrayList<MembershipListItem>(top);
-    for (int idx = 0; idx < top; ++idx) {
+    final MembershipList memberships = m_userContext.getMemberships();
+    final MembershipInfo[] m = memberships.getMemberships();
+    final int top = m.length;
+    final List<MembershipListItem> list = new ArrayList<>(top);
+    for (final MembershipInfo membershipInfo : m) {
       try {
-        MembershipInfo each = m[idx];
-        long conf = each.getConference();
+        final long conf = membershipInfo.getConference();
 
         // Don't include invisible conferences
         //
-        if (!this.isVisible(conf)) continue;
-        int n = this.countUnread(conf);
+        if (!isVisible(conf)) {
+          continue;
+        }
+        final int n = countUnread(conf);
 
-        if (n > 0)
-          list.add(
-              new MembershipListItem(new NameAssociation(conf, this.getCensoredName(conf)), n));
-      } catch (ObjectNotFoundException e) {
+        if (n > 0) {
+          list.add(new MembershipListItem(new NameAssociation(conf, getCensoredName(conf)), n));
+        }
+      } catch (final ObjectNotFoundException e) {
         // Probably deleted. Just skip!
       }
     }
-    MembershipListItem[] answer = new MembershipListItem[list.size()];
+    final MembershipListItem[] answer = new MembershipListItem[list.size()];
     list.toArray(answer);
     return answer;
   }
 
+  @Override
   public UserListItem[] listLoggedInUsers() throws UnexpectedException {
-    List<ServerSession> sessions = m_sessions.listSessions();
-    UserListItem[] answer = new UserListItem[sessions.size()];
+    final List<ServerSession> sessions = m_sessions.listSessions();
+    final UserListItem[] answer = new UserListItem[sessions.size()];
     int idx = 0;
-    for (Iterator<ServerSession> itor = sessions.iterator(); itor.hasNext(); ++idx) {
-      ServerSession session = itor.next();
-      long confId = session.getCurrentConferenceId();
-      long user = session.getLoggedInUserId();
+    for (final Iterator<ServerSession> itor = sessions.iterator(); itor.hasNext(); ++idx) {
+      final ServerSession session = itor.next();
+      final long confId = session.getCurrentConferenceId();
+      final long user = session.getLoggedInUserId();
       String userName = "???";
       boolean inMailbox = false;
       try {
-        userName = this.getCensoredName(user).getName();
+        userName = getCensoredName(user).getName();
         inMailbox = confId == user;
-      } catch (ObjectNotFoundException e) {
+      } catch (final ObjectNotFoundException e) {
         // User deleted! Strange, but we allow it. User will be displayed as "???"
         //
       }
       Name conferenceName = new Name("???", Visibilities.PUBLIC, NameManager.CONFERENCE_KIND);
       try {
-        conferenceName = this.getCensoredName(confId);
+        conferenceName = getCensoredName(confId);
 
         // Wipe out protected names
         //
-        if (!this.isVisible(confId)) conferenceName.hideName();
-      } catch (ObjectNotFoundException e) {
+        if (!isVisible(confId)) {
+          conferenceName.hideName();
+        }
+      } catch (final ObjectNotFoundException e) {
         // Conference deleted. Display as "???"
       }
 
@@ -2045,7 +2009,7 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
               new NameAssociation(confId, conferenceName),
               inMailbox,
               session.getLoginTime(),
-              ((ServerSessionImpl) session).getLastHeartbeat(),
+              session.getLastHeartbeat(),
               session.getActivity(),
               session.getActivityString(),
               session.getLastObject());
@@ -2053,99 +2017,108 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
     return answer;
   }
 
-  public boolean hasSession(long userId) {
+  @Override
+  public boolean hasSession(final long userId) {
     return m_sessions.userHasSession(userId);
   }
 
-  public synchronized void postEvent(Event e) {
+  @Override
+  public synchronized void postEvent(final Event e) {
     m_incomingEvents.addLast(e);
-    this.notify();
+    notify();
   }
 
-  public synchronized Event pollEvent(int timeoutMs) throws InterruptedException {
-    if (m_incomingEvents.isEmpty()) this.wait(timeoutMs);
-    if (m_incomingEvents.isEmpty()) return null;
-    return (Event) m_incomingEvents.removeFirst();
+  @Override
+  public synchronized Event pollEvent(final int timeoutMs) throws InterruptedException {
+    if (m_incomingEvents.isEmpty()) {
+      wait(timeoutMs);
+    }
+    if (m_incomingEvents.isEmpty()) {
+      return null;
+    }
+    return m_incomingEvents.removeFirst();
   }
 
+  @Override
   public long getLastHeartbeat() {
     return m_lastHeartbeat;
   }
 
+  @Override
   public void enableSelfRegistration() throws AuthorizationException, UnexpectedException {
-    this.checkRights(UserPermissions.ADMIN);
+    checkRights(UserPermissions.ADMIN);
     try {
       m_da.getSettingManager().changeSetting(SettingKeys.ALLOW_SELF_REGISTER, "", 1);
-    } catch (SQLException e) {
+    } catch (final SQLException e) {
       throw new UnexpectedException(-1, e);
     }
   }
 
+  @Override
   public void disableSelfRegistration() throws AuthorizationException, UnexpectedException {
-    this.checkRights(UserPermissions.ADMIN);
+    checkRights(UserPermissions.ADMIN);
     try {
       m_da.getSettingManager().changeSetting(SettingKeys.ALLOW_SELF_REGISTER, "", 0);
-    } catch (SQLException e) {
+    } catch (final SQLException e) {
       throw new UnexpectedException(-1, e);
     }
   }
 
-  private void sendChatMessageHelper(long userId, String message) {
+  private void sendChatMessageHelper(final long userId, final String message) {
     if (m_sessions.userHasSession(userId)) {
-      if (message.substring(0, 1).equals("!")) {
-        m_sessions.sendEvent(
-            userId, new ChatAnonymousMessageEvent(userId, message.substring(1, message.length())));
+      if (message.charAt(0) == '!') {
+        m_sessions.sendEvent(userId, new ChatAnonymousMessageEvent(userId, message.substring(1)));
       } else {
         m_sessions.sendEvent(
             userId,
             new ChatMessageEvent(
-                userId, this.getLoggedInUserId(), this.getLoggedInUser().getName(), message));
+                userId, getLoggedInUserId(), getLoggedInUser().getName(), message));
       }
     }
     m_stats.incNumChats();
   }
 
+  @Override
   public NameAssociation[] sendMulticastMessage(
-      long destinations[], String message, boolean logAsMulticast)
-      throws NotLoggedInException, ObjectNotFoundException, AllRecipientsNotReachedException,
-          UnexpectedException {
+      final long[] destinations, final String message, final boolean logAsMulticast)
+      throws ObjectNotFoundException, UnexpectedException {
     try {
       // Create a message log item. If we have multiple recipients, they all share
       // the same item.
       //
-      UserManager um = m_da.getUserManager();
-      MessageLogManager mlm = m_da.getMessageLogManager();
-      long logId =
-          mlm.storeMessage(
-              this.getLoggedInUserId(), this.getLoggedInUser().getName().getName(), message);
+      final UserManager um = m_da.getUserManager();
+      final MessageLogManager mlm = m_da.getMessageLogManager();
+      final long logId =
+          mlm.storeMessage(getLoggedInUserId(), getLoggedInUser().getName().getName(), message);
 
       // Create a link for the logged in user. Used for retrieving messages sent.
       //
       mlm.storeMessagePointer(
           logId,
-          this.getLoggedInUserId(),
+          getLoggedInUserId(),
           true,
           logAsMulticast ? MessageLogKinds.MULTICAST : MessageLogKinds.CHAT);
 
-      ArrayList<NameAssociation> refused = new ArrayList<NameAssociation>(destinations.length);
+      final ArrayList<NameAssociation> refused = new ArrayList<>(destinations.length);
       boolean explicitToSelf = false;
 
       // Set to make sure we don't send the message to the same user more than once.
       //
-      HashSet<Long> s = new HashSet<Long>();
-      HashSet<Name> rec_names = new HashSet<Name>();
-      for (int i = 0; i < destinations.length; ++i) {
-        long each = destinations[i];
+      final HashSet<Long> s = new HashSet<>();
+      final HashSet<Name> rec_names = new HashSet<>();
+      for (final long each : destinations) {
         if (-1 == each) {
           break;
         } else {
-          if (NameManager.USER_KIND == m_da.getNameManager().getObjectKind(destinations[i])) {
+          if (NameManager.USER_KIND == m_da.getNameManager().getObjectKind(each)) {
             // Are we explicitly sending to ourselves`?
             //
-            UserInfo ui = um.loadUser(each);
-            if (each == this.getLoggedInUserId()) explicitToSelf = true;
-            UserContext uc = UserContextFactory.getInstance().getContextOrNull(each);
-            if (uc != null && uc.allowsChat(um, this.getLoggedInUserId())) {
+            final UserInfo ui = um.loadUser(each);
+            if (each == getLoggedInUserId()) {
+              explicitToSelf = true;
+            }
+            final UserContext uc = UserContextFactory.getInstance().getContextOrNull(each);
+            if (uc != null && uc.allowsChat(um, getLoggedInUserId())) {
               s.add(each);
               rec_names.add(ui.getName());
             } else {
@@ -2153,18 +2126,22 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
             }
           } else // conference
           {
-            MembershipInfo[] mi = m_da.getMembershipManager().listMembershipsByConference(each);
-            rec_names.add(this.getName(each));
-            for (int j = 0; j < mi.length; ++j) {
-              long uid = mi[j].getUser();
-              UserContext uc = UserContextFactory.getInstance().getContextOrNull(uid);
+            final MembershipInfo[] mi =
+                m_da.getMembershipManager().listMembershipsByConference(each);
+            rec_names.add(getName(each));
+            for (final MembershipInfo membershipInfo : mi) {
+              final long uid = membershipInfo.getUser();
+              final UserContext uc = UserContextFactory.getInstance().getContextOrNull(uid);
               if (uc != null) {
-                UserInfo ui = um.loadUser(uid);
+                final UserInfo ui = um.loadUser(uid);
 
                 // Does the receiver accept chat messages
                 //
-                if (uc.allowsChat(um, uid)) s.add(new Long(uid));
-                else refused.add(new NameAssociation(uid, ui.getName()));
+                if (uc.allowsChat(um, uid)) {
+                  s.add(uid);
+                } else {
+                  refused.add(new NameAssociation(uid, ui.getName()));
+                }
               }
             }
           }
@@ -2175,33 +2152,30 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
       // TODO: This should be a flag condition!
       //
       if (!explicitToSelf) {
-        s.remove(new Long(this.getLoggedInUserId()));
+        s.remove(getLoggedInUserId());
       }
 
       // Temporary kludge. I need to extend the event class and rewrite
       // some of the formatting.
       //
-      String msgToSend;
+      StringBuilder msgToSend;
       if (s.size() > 1) {
-        msgToSend = "[";
-        Iterator<Name> buildRecIter = rec_names.iterator();
-        while (buildRecIter.hasNext()) {
-          msgToSend += buildRecIter.next().toString();
-          msgToSend += ", ";
+        msgToSend = new StringBuilder("[");
+        for (final Name rec_name : rec_names) {
+          msgToSend.append(rec_name.toString());
+          msgToSend.append(", ");
         }
-        msgToSend = msgToSend.substring(0, msgToSend.length() - 2);
-        msgToSend += "] ";
-        msgToSend += message;
+        msgToSend = new StringBuilder(msgToSend.substring(0, msgToSend.length() - 2));
+        msgToSend.append("] ");
+        msgToSend.append(message);
       } else {
-        msgToSend = message;
+        msgToSend = new StringBuilder(message);
       }
 
       // Now just send it
       //
-      Iterator<Long> iter = s.iterator();
-      while (iter.hasNext()) {
-        long user = iter.next().longValue();
-        sendChatMessageHelper(user, msgToSend);
+      for (final long user : s) {
+        sendChatMessageHelper(user, msgToSend.toString());
 
         // Create link from recipient to message
         //
@@ -2209,68 +2183,69 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
             logId, user, false, logAsMulticast ? MessageLogKinds.MULTICAST : MessageLogKinds.CHAT);
       }
 
-      NameAssociation[] answer = new NameAssociation[refused.size()];
+      final NameAssociation[] answer = new NameAssociation[refused.size()];
       refused.toArray(answer);
       return answer;
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public int[] verifyChatRecipients(long[] recipients)
-      throws ObjectNotFoundException, UnexpectedException {
-    NameManager nm = m_da.getNameManager();
-    UserManager um = m_da.getUserManager();
-    int top = recipients.length;
-    int[] answer = new int[top];
+  @Override
+  public int[] verifyChatRecipients(final long[] recipients) throws UnexpectedException {
+    final NameManager nm = m_da.getNameManager();
+    final UserManager um = m_da.getUserManager();
+    final int top = recipients.length;
+    final int[] answer = new int[top];
     for (int idx = 0; idx < top; idx++) {
-      long each = recipients[idx];
+      final long each = recipients[idx];
       try {
-        short kind = nm.getObjectKind(each);
+        final short kind = nm.getObjectKind(each);
 
         // Conferences are always considered ok recipients
         //
-        if (kind == NameManager.CONFERENCE_KIND) answer[idx] = ChatRecipientStatus.OK_CONFERENCE;
-        else {
+        if (kind == NameManager.CONFERENCE_KIND) {
+          answer[idx] = ChatRecipientStatus.OK_CONFERENCE;
+        } else {
           // User. Check if logged in.
           //
-          UserContext uc = UserContextFactory.getInstance().getContextOrNull(each);
-          if (uc == null) answer[idx] = ChatRecipientStatus.NOT_LOGGED_IN;
-          else {
+          final UserContext uc = UserContextFactory.getInstance().getContextOrNull(each);
+          if (uc == null) {
+            answer[idx] = ChatRecipientStatus.NOT_LOGGED_IN;
+          } else {
             // Logged in. Do they receive chat messages?
             //
             answer[idx] =
-                uc.allowsChat(um, this.getLoggedInUserId())
+                uc.allowsChat(um, getLoggedInUserId())
                     ? ChatRecipientStatus.OK_USER
                     : ChatRecipientStatus.REFUSES_MESSAGES;
           }
         }
-      } catch (ObjectNotFoundException e) {
+      } catch (final ObjectNotFoundException e) {
         answer[idx] = ChatRecipientStatus.NONEXISTENT;
       }
     }
     return answer;
   }
 
-  public NameAssociation[] broadcastChatMessage(String message, short kind)
+  @Override
+  public NameAssociation[] broadcastChatMessage(final String message, final short kind)
       throws UnexpectedException {
     try {
       // Create a message log item. If we have multiple recipients, they all share
       // the same item.
       //
-      UserManager um = m_da.getUserManager();
-      MessageLogManager mlm = m_da.getMessageLogManager();
-      long logId =
-          mlm.storeMessage(
-              this.getLoggedInUserId(), this.getLoggedInUser().getName().getName(), message);
+      final UserManager um = m_da.getUserManager();
+      final MessageLogManager mlm = m_da.getMessageLogManager();
+      final long logId =
+          mlm.storeMessage(getLoggedInUserId(), getLoggedInUser().getName().getName(), message);
 
-      if (message.substring(0, 1).equals("!")) {
-        m_sessions.broadcastEvent(
-            new BroadcastAnonymousMessageEvent(message.substring(1, message.length()), logId));
+      if (message.charAt(0) == '!') {
+        m_sessions.broadcastEvent(new BroadcastAnonymousMessageEvent(message.substring(1), logId));
       } else {
         m_sessions.broadcastEvent(
             new BroadcastMessageEvent(
-                this.getLoggedInUserId(), this.getLoggedInUser().getName(), message, logId, kind));
+                getLoggedInUserId(), getLoggedInUser().getName(), message, logId, kind));
       }
 
       // Log to chat log. This could be done in the event handlers, but
@@ -2280,227 +2255,257 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
       // while doing this and that the log won't be 100% correct, but that's
       // a tradeoff we're willing to make at this point.
       //
-      ArrayList<NameAssociation> bounces = new ArrayList<NameAssociation>();
-      for (UserContext uc : UserContextFactory.getInstance().listContexts()) {
-        long userId = uc.getUserId();
+      final ArrayList<NameAssociation> bounces = new ArrayList<>();
+      for (final UserContext uc : UserContextFactory.getInstance().listContexts()) {
+        final long userId = uc.getUserId();
         try {
           // Find out if recipients allows broadcasts
           //
-          UserInfo user = um.loadUser(userId);
+          final UserInfo user = um.loadUser(userId);
 
-          if (uc.allowsBroadcast(um, this.getLoggedInUserId()))
+          if (uc.allowsBroadcast(um, getLoggedInUserId())) {
             mlm.storeMessagePointer(logId, userId, false, kind);
-          else bounces.add(new NameAssociation(userId, user.getName()));
-        } catch (ObjectNotFoundException e) {
+          } else {
+            bounces.add(new NameAssociation(userId, user.getName()));
+          }
+        } catch (final ObjectNotFoundException e) {
           // Sending to nonexisting user? Probably deleted while
           // we were iterating. Just skip!
           //
         }
       }
-      NameAssociation[] answer = new NameAssociation[bounces.size()];
+      final NameAssociation[] answer = new NameAssociation[bounces.size()];
       bounces.toArray(answer);
       m_stats.incNumBroadcasts();
       return answer;
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
+  @Override
   public void clearCache() throws AuthorizationException {
     // Only sysops can do this.
     //
-    this.checkRights(UserPermissions.ADMIN);
+    checkRights(UserPermissions.ADMIN);
     CacheManager.instance().clear();
 
     // Tell all clients to reload their local user profile copy
     //
-    this.broadcastEvent(new ReloadUserProfileEvent(-1));
+    broadcastEvent(new ReloadUserProfileEvent(-1));
   }
 
-  public short getObjectKind(long object) throws ObjectNotFoundException {
+  @Override
+  public short getObjectKind(final long object) throws ObjectNotFoundException {
     return m_da.getNameManager().getObjectKind(object);
   }
 
-  public void updateCharacterset(String charset) throws UnexpectedException {
+  @Override
+  public void updateCharacterset(final String charset) throws UnexpectedException {
     try {
-      m_da.getUserManager().updateCharacterset(this.getLoggedInUserId(), charset);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
-    } catch (ObjectNotFoundException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+      m_da.getUserManager().updateCharacterset(getLoggedInUserId(), charset);
+    } catch (final SQLException | ObjectNotFoundException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public void updateTimeZone(String timeZone) throws UnexpectedException {
+  @Override
+  public void updateTimeZone(final String timeZone) throws UnexpectedException {
     try {
-      m_da.getUserManager().changeTimezone(this.getLoggedInUserId(), timeZone);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
-    } catch (ObjectNotFoundException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+      m_da.getUserManager().changeTimezone(getLoggedInUserId(), timeZone);
+    } catch (final SQLException | ObjectNotFoundException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public void setConferencePermissions(long conf, long user, int permissions)
+  @Override
+  public void setConferencePermissions(final long conf, final long user, final int permissions)
       throws UnexpectedException {
     try {
-      MembershipManager mm = m_da.getMembershipManager();
+      final MembershipManager mm = m_da.getMembershipManager();
 
       // Get hold of conference permission set and calculate negation mask.
       // Any permission granted by default for the conference, but is denied
       // in user-specific mask should be included in the negation mask.
       //
-      int c = this.getCurrentConference().getPermissions();
-      int negations = c & ~permissions;
+      final int c = getCurrentConference().getPermissions();
+      final int negations = c & ~permissions;
       mm.updateConferencePermissions(user, conf, permissions, negations);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public void setConferencePermissionsInCurrentConference(long user, int permissions)
+  @Override
+  public void setConferencePermissionsInCurrentConference(final long user, final int permissions)
       throws UnexpectedException {
-    this.setConferencePermissions(this.getCurrentConferenceId(), user, permissions);
+    setConferencePermissions(getCurrentConferenceId(), user, permissions);
   }
 
-  public void revokeConferencePermissions(long conf, long user) throws UnexpectedException {
+  @Override
+  public void revokeConferencePermissions(final long conf, final long user)
+      throws UnexpectedException {
     try {
       m_da.getMembershipManager().updateConferencePermissions(user, conf, 0, 0xffffffff);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public void revokeConferencePermissionsInCurrentConference(long user) throws UnexpectedException {
-    this.revokeConferencePermissions(this.getCurrentConferenceId(), user);
+  @Override
+  public void revokeConferencePermissionsInCurrentConference(final long user)
+      throws UnexpectedException {
+    revokeConferencePermissions(getCurrentConferenceId(), user);
   }
 
-  public ConferencePermission[] listConferencePermissions(long conf) throws UnexpectedException {
+  @Override
+  public ConferencePermission[] listConferencePermissions(final long conf)
+      throws UnexpectedException {
     try {
       return m_da.getMembershipManager().listPermissions(conf);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
+  @Override
   public ConferencePermission[] listConferencePermissionsInCurrentConference()
       throws UnexpectedException {
-    return this.listConferencePermissions(this.getCurrentConferenceId());
+    return listConferencePermissions(getCurrentConferenceId());
   }
 
-  public int getPermissionsInConference(long conferenceId)
+  @Override
+  public int getPermissionsInConference(final long conferenceId)
       throws ObjectNotFoundException, UnexpectedException {
-    return this.getUserPermissionsInConference(this.getLoggedInUserId(), conferenceId);
+    return getUserPermissionsInConference(getLoggedInUserId(), conferenceId);
   }
 
-  public int getUserPermissionsInConference(long userId, long conferenceId)
+  @Override
+  public int getUserPermissionsInConference(final long userId, final long conferenceId)
       throws ObjectNotFoundException, UnexpectedException {
     try {
       return m_da.getMembershipManager().getPermissions(userId, conferenceId);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
+  @Override
   public int getPermissionsInCurrentConference()
       throws ObjectNotFoundException, UnexpectedException {
     try {
       return m_da.getMembershipManager()
-          .getPermissions(this.getLoggedInUserId(), this.getCurrentConferenceId());
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+          .getPermissions(getLoggedInUserId(), getCurrentConferenceId());
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public boolean hasPermissionInConference(long conferenceId, int mask)
+  @Override
+  public boolean hasPermissionInConference(final long conferenceId, final int mask)
       throws ObjectNotFoundException, UnexpectedException {
-    return this.hasPermissionInConference(this.getLoggedInUserId(), conferenceId, mask);
+    return hasPermissionInConference(getLoggedInUserId(), conferenceId, mask);
   }
 
-  public boolean hasPermissionInConference(long userId, long conferenceId, int mask)
+  public boolean hasPermissionInConference(
+      final long userId, final long conferenceId, final int mask)
       throws ObjectNotFoundException, UnexpectedException {
-    UserInfo ui = this.getUser(userId);
+    final UserInfo ui = getUser(userId);
     try {
       // Do we have the permission to disregard conference permissions?
       //
       if (ui.hasRights(UserPermissions.DISREGARD_CONF_PERM))
-        // We can only disregard everything but ADMIN_PERMISSION.
-        //
-        if ((mask & ConferencePermissions.ADMIN_PERMISSION) != mask) return true;
+      // We can only disregard everything but ADMIN_PERMISSION.
+      //
+      {
+        if ((mask & ConferencePermissions.ADMIN_PERMISSION) != mask) {
+          return true;
+        }
+      }
       return m_da.getMembershipManager().hasPermission(ui.getId(), conferenceId, mask);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public boolean hasPermissionInCurrentConference(int mask)
-      throws AuthorizationException, ObjectNotFoundException, UnexpectedException {
-    return hasPermissionInConference(this.getCurrentConferenceId(), mask);
+  @Override
+  public boolean hasPermissionInCurrentConference(final int mask)
+      throws ObjectNotFoundException, UnexpectedException {
+    return hasPermissionInConference(getCurrentConferenceId(), mask);
   }
 
-  public void changeReplyToConference(long originalConferenceId, long newReplyToConferenceId)
+  @Override
+  public void changeReplyToConference(
+      final long originalConferenceId, final long newReplyToConferenceId)
       throws AuthorizationException, ObjectNotFoundException, UnexpectedException {
     // Check rights. This also checks if the original conference exists.
-    this.assertModifyConference(originalConferenceId);
+    assertModifyConference(originalConferenceId);
 
     try {
       m_da.getConferenceManager()
           .changeReplyToConference(originalConferenceId, newReplyToConferenceId);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public void renameObject(long id, String newName)
+  @Override
+  public void renameObject(final long id, final String newName)
       throws DuplicateNameException, ObjectNotFoundException, AuthorizationException,
           UnexpectedException {
     try {
-      if (!this.userCanChangeNameOf(id)) throw new AuthorizationException();
+      if (!userCanChangeNameOf(id)) {
+        throw new AuthorizationException();
+      }
       m_da.getNameManager().renameObject(id, newName);
-      this.sendEvent(id, new ReloadUserProfileEvent(id));
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+      sendEvent(id, new ReloadUserProfileEvent(id));
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public void changeSuffixOfLoggedInUser(String suffix)
-      throws DuplicateNameException, ObjectNotFoundException, AuthorizationException,
-          UnexpectedException {
+  @Override
+  public void changeSuffixOfLoggedInUser(final String suffix)
+      throws DuplicateNameException, ObjectNotFoundException, UnexpectedException {
     try {
-      long me = this.getLoggedInUserId();
-      String name = this.getName(me).getName();
+      final long me = getLoggedInUserId();
+      final String name = getName(me).getName();
       m_da.getNameManager().renameObject(me, NameUtils.addSuffix(name, suffix));
-      this.sendEvent(me, new ReloadUserProfileEvent(me));
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+      sendEvent(me, new ReloadUserProfileEvent(me));
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public void changeSuffixOfUser(long id, String suffix)
+  @Override
+  public void changeSuffixOfUser(final long id, final String suffix)
       throws DuplicateNameException, ObjectNotFoundException, AuthorizationException,
           UnexpectedException {
     try {
-      this.checkRights(UserPermissions.CHANGE_ANY_NAME);
-      Name name = this.getName(id);
+      checkRights(UserPermissions.CHANGE_ANY_NAME);
+      final Name name = getName(id);
       m_da.getNameManager().renameObject(id, NameUtils.addSuffix(name.getName(), suffix));
-      this.sendEvent(id, new ReloadUserProfileEvent(id));
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+      sendEvent(id, new ReloadUserProfileEvent(id));
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public boolean userCanChangeNameOf(long id) throws UnexpectedException {
+  @Override
+  public boolean userCanChangeNameOf(final long id) throws UnexpectedException {
     // Do we have sysop rights? Anything goes!
     //
-    if (this.getLoggedInUser().hasRights(UserPermissions.CHANGE_ANY_NAME)) return true;
+    if (getLoggedInUser().hasRights(UserPermissions.CHANGE_ANY_NAME)) {
+      return true;
+    }
 
     // Otherwise, we may only change names of conferences we're the admin
     // of.
     //
     try {
-      return id != this.getLoggedInUserId()
-          && this.hasPermissionInConference(id, ConferencePermissions.ADMIN_PERMISSION);
-    } catch (ObjectNotFoundException e) {
+      return id != getLoggedInUserId()
+          && hasPermissionInConference(id, ConferencePermissions.ADMIN_PERMISSION);
+    } catch (final ObjectNotFoundException e) {
       // Conference not found. It's probably a user then, and we
       // don't have the right to admin rights for that.
       //
@@ -2508,38 +2513,42 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
     }
   }
 
-  public void changePassword(long userId, String oldPassword, String password)
+  @Override
+  public void changePassword(final long userId, final String oldPassword, final String password)
       throws ObjectNotFoundException, AuthorizationException, UnexpectedException,
           BadPasswordException {
     try {
       // Check permissions unless we change our own password
       //
-      if (userId != this.getLoggedInUserId()) this.checkRights(UserPermissions.USER_ADMIN);
-      else m_da.getUserManager().authenticate(this.getUser(userId).getUserid(), oldPassword);
+      if (userId != getLoggedInUserId()) {
+        checkRights(UserPermissions.USER_ADMIN);
+      } else {
+        m_da.getUserManager().authenticate(getUser(userId).getUserid(), oldPassword);
+      }
       m_da.getUserManager().changePassword(userId, password);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
-    } catch (NoSuchAlgorithmException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
-    } catch (AuthenticationException e) {
+    } catch (final SQLException | NoSuchAlgorithmException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
+    } catch (final AuthenticationException e) {
       throw new BadPasswordException();
     }
   }
 
-  public void changeUserFlags(long[] set, long[] reset)
+  @Override
+  public void changeUserFlags(final long[] set, final long[] reset)
       throws ObjectNotFoundException, UnexpectedException {
     try {
       // Load current flags.
       //
-      UserInfo ui = this.getLoggedInUser();
-      long id = ui.getId();
-      long[] oldFlags = ui.getFlags();
+      final UserInfo ui = getLoggedInUser();
+      final long id = ui.getId();
+      final long[] oldFlags = ui.getFlags();
 
       // Calculate new flags sets
       //
-      long[] flags = new long[UserFlags.NUM_FLAG_WORD];
-      for (int idx = 0; idx < UserFlags.NUM_FLAG_WORD; ++idx)
+      final long[] flags = new long[UserFlags.NUM_FLAG_WORD];
+      for (int idx = 0; idx < UserFlags.NUM_FLAG_WORD; ++idx) {
         flags[idx] = (oldFlags[idx] | set[idx]) & ~reset[idx];
+      }
 
       // Store in database
       //
@@ -2547,24 +2556,25 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
 
       // Force clients to reload local cache
       //
-      this.sendEvent(id, new ReloadUserProfileEvent(id));
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+      sendEvent(id, new ReloadUserProfileEvent(id));
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public void changeUserPermissions(long user, long set, long reset)
+  @Override
+  public void changeUserPermissions(final long user, final long set, final long reset)
       throws ObjectNotFoundException, AuthorizationException, UnexpectedException {
     try {
       // Check permissions
       //
-      this.checkRights(UserPermissions.USER_ADMIN);
+      checkRights(UserPermissions.USER_ADMIN);
 
       // Load current permissions
       //
-      UserManager um = m_da.getUserManager();
-      UserInfo ui = um.loadUser(user);
-      long oldFlags = ui.getRights();
+      final UserManager um = m_da.getUserManager();
+      final UserInfo ui = um.loadUser(user);
+      final long oldFlags = ui.getRights();
 
       // Store new permissions in database
       //
@@ -2572,307 +2582,352 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
 
       // Force clients to invalidate local cache
       //
-      this.sendEvent(user, new ReloadUserProfileEvent(user));
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+      sendEvent(user, new ReloadUserProfileEvent(user));
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
+  @Override
   public void updateConferencePermissions(
-      long id, int permissions, int nonmemberpermissions, short visibility)
+      final long id, final int permissions, final int nonmemberpermissions, final short visibility)
       throws ObjectNotFoundException, AuthorizationException, UnexpectedException {
     // Load conference
     //
-    ConferenceInfo ci = this.getConference(id);
+    final ConferenceInfo ci = getConference(id);
 
     // Check permissions. If we own the conference, we can change it. Otherwise, we
     // can change it only if we hold the CONFERENCE_ADMIN priv.
     //
-    if (ci.getAdministrator() != this.getLoggedInUserId()
-        && !this.getLoggedInUser().hasRights(UserPermissions.CONFERENCE_ADMIN))
+    if (ci.getAdministrator() != getLoggedInUserId()
+        && !getLoggedInUser().hasRights(UserPermissions.CONFERENCE_ADMIN)) {
       throw new AuthorizationException();
+    }
 
     // Update!
     //
     try {
       m_da.getConferenceManager()
           .changePermissions(id, permissions, nonmemberpermissions, visibility);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public int skipMessagesBySubject(String subject, boolean skipGlobal)
+  @Override
+  public int skipMessagesBySubject(final String subject, final boolean skipGlobal)
       throws UnexpectedException, ObjectNotFoundException {
     return skipGlobal
-        ? this.performOperationBySubject(subject, new MarkAsReadOperation())
-        : this.performOperationBySubjectInConference(subject, new MarkAsReadOperation());
+        ? performOperationBySubject(subject, new MarkAsReadOperation())
+        : performOperationBySubjectInConference(subject, new MarkAsReadOperation());
   }
 
-  public int skipThread(long message)
+  @Override
+  public int skipThread(final long message)
       throws UnexpectedException, ObjectNotFoundException, SelectionOverflowException {
     try {
-      Message m = m_da.getMessageManager().loadMessage(message);
-      long thread = m.getThread();
-      if (thread <= 0) return 0;
-      return this.performThreadOperation(m.getThread(), 100000, new MarkAsReadOperation());
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+      final Message m = m_da.getMessageManager().loadMessage(message);
+      final long thread = m.getThread();
+      if (thread <= 0) {
+        return 0;
+      }
+      return performThreadOperation(m.getThread(), 100000, new MarkAsReadOperation());
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public int skipBranch(long root) throws UnexpectedException, ObjectNotFoundException {
-    return this.performTreeOperation(root, new MarkAsReadOperation());
+  @Override
+  public int skipBranch(final long root) throws UnexpectedException, ObjectNotFoundException {
+    return performTreeOperation(root, new MarkAsReadOperation());
   }
 
-  public MessageLogItem[] getChatMessagesFromLog(int limit) throws UnexpectedException {
+  @Override
+  public MessageLogItem[] getChatMessagesFromLog(final int limit) throws UnexpectedException {
     try {
-      return m_da.getMessageLogManager().listChatMessages(this.getLoggedInUserId(), limit);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+      return m_da.getMessageLogManager().listChatMessages(getLoggedInUserId(), limit);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public MessageLogItem[] getMulticastMessagesFromLog(int limit) throws UnexpectedException {
+  @Override
+  public MessageLogItem[] getMulticastMessagesFromLog(final int limit) throws UnexpectedException {
     try {
-      return m_da.getMessageLogManager().listMulticastMessages(this.getLoggedInUserId(), limit);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+      return m_da.getMessageLogManager().listMulticastMessages(getLoggedInUserId(), limit);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public MessageLogItem[] getBroadcastMessagesFromLog(int limit) throws UnexpectedException {
+  @Override
+  public MessageLogItem[] getBroadcastMessagesFromLog(final int limit) throws UnexpectedException {
     try {
-      return m_da.getMessageLogManager().listBroadcastMessages(this.getLoggedInUserId(), limit);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+      return m_da.getMessageLogManager().listBroadcastMessages(getLoggedInUserId(), limit);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
+  @Override
   public HeartbeatListener getHeartbeatListener() {
     return new HeartbeatListenerImpl();
   }
 
-  public void killSession(int sessionId)
-      throws AuthorizationException, ObjectNotFoundException, UnexpectedException {
+  @Override
+  public void killSession(final int sessionId) throws AuthorizationException, UnexpectedException {
     // We have to be sysops to do this!
     //
-    this.checkRights(UserPermissions.ADMIN);
+    checkRights(UserPermissions.ADMIN);
 
     // SET THEM UP THE BOMB! FOR GREAT JUSTICE!
     //
     try {
       m_sessions.killSessionById(sessionId);
-    } catch (InterruptedException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final InterruptedException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public void killAllSessions()
-      throws AuthorizationException, ObjectNotFoundException, UnexpectedException {
+  @Override
+  public void killAllSessions() throws AuthorizationException, UnexpectedException {
     // We have to be sysops to do this!
     //
-    this.checkRights(UserPermissions.ADMIN);
+    checkRights(UserPermissions.ADMIN);
 
     // Disallow new logins
     //
-    this.prohibitLogin();
+    prohibitLogin();
 
     // SET UP US THE BIG BOMB!!
     // Kill all sessions (except this one)
     //
-    List<ServerSession> sessions = m_sessions.listSessions();
-    for (ServerSession each : sessions) {
-      if (each != this) this.killSession(each.getSessionId());
+    final List<ServerSession> sessions = m_sessions.listSessions();
+    for (final ServerSession each : sessions) {
+      if (each != this) {
+        killSession(each.getSessionId());
+      }
     }
   }
 
+  @Override
   public void prohibitLogin() throws AuthorizationException {
     // We have to be sysops to do this!
     //
-    this.checkRights(UserPermissions.ADMIN);
+    checkRights(UserPermissions.ADMIN);
     m_sessions.prohibitLogin();
   }
 
+  @Override
   public void allowLogin() throws AuthorizationException {
     // We have to be sysops to do this!
     //
-    this.checkRights(UserPermissions.ADMIN);
+    checkRights(UserPermissions.ADMIN);
     m_sessions.allowLogin();
   }
 
-  public UserLogItem[] listUserLog(Timestamp start, Timestamp end, int offset, int length)
+  @Override
+  public UserLogItem[] listUserLog(
+      final Timestamp start, final Timestamp end, final int offset, final int length)
       throws UnexpectedException {
     try {
       return m_da.getUserLogManager().getByDate(start, end, offset, length);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
+  @Override
   public UserLogItem[] listUserLog(
-      long user, Timestamp start, Timestamp end, int offset, int length)
+      final long user,
+      final Timestamp start,
+      final Timestamp end,
+      final int offset,
+      final int length)
       throws UnexpectedException {
     try {
       return m_da.getUserLogManager().getByUser(user, start, end, offset, length);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public FileStatus statFile(long parent, String name)
+  @Override
+  public FileStatus statFile(final long parent, final String name)
       throws ObjectNotFoundException, UnexpectedException {
     try {
       return m_da.getFileManager().stat(parent, name);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public FileStatus[] listFiles(long parent, String pattern)
+  @Override
+  public FileStatus[] listFiles(final long parent, final String pattern)
       throws UnexpectedException, ObjectNotFoundException {
-    if (!this.isVisible(parent)) throw new ObjectNotFoundException("id=" + parent);
+    if (!isVisible(parent)) {
+      throw new ObjectNotFoundException("id=" + parent);
+    }
     try {
       return m_da.getFileManager().list(parent, pattern);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public String readFile(long parent, String name)
+  @Override
+  public String readFile(final long parent, final String name)
       throws ObjectNotFoundException, AuthorizationException, UnexpectedException {
     try {
-      FileManager fm = m_da.getFileManager();
-      if (!((this.getLoggedInUser().getRights() & UserPermissions.ADMIN) != 0)
+      final FileManager fm = m_da.getFileManager();
+      if ((getLoggedInUser().getRights() & UserPermissions.ADMIN) == 0
           && !hasPermissionInConference(parent, ConferencePermissions.READ_PERMISSION)
-          && (fm.stat(parent, name).getProtection() & FileProtection.ALLOW_READ) == 0)
+          && (fm.stat(parent, name).getProtection() & FileProtection.ALLOW_READ) == 0) {
         throw new AuthorizationException();
+      }
       return fm.read(parent, name);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public void storeFile(long parent, String name, String content, int permissions)
+  @Override
+  public void storeFile(
+      final long parent, final String name, final String content, final int permissions)
       throws AuthorizationException, ObjectNotFoundException, UnexpectedException {
     try {
-      FileManager fm = m_da.getFileManager();
-      boolean isSysop = (this.getLoggedInUser().getRights() & UserPermissions.ADMIN) != 0;
-      boolean hasParentRights =
+      final FileManager fm = m_da.getFileManager();
+      final boolean isSysop = (getLoggedInUser().getRights() & UserPermissions.ADMIN) != 0;
+      final boolean hasParentRights =
           isSysop || hasPermissionInConference(parent, ConferencePermissions.WRITE_PERMISSION);
       try {
-        FileStatus fs = fm.stat(parent, name);
-        if (!hasParentRights && (fs.getProtection() & FileProtection.ALLOW_WRITE) == 0)
+        final FileStatus fs = fm.stat(parent, name);
+        if (!hasParentRights && (fs.getProtection() & FileProtection.ALLOW_WRITE) == 0) {
           throw new AuthorizationException();
-      } catch (ObjectNotFoundException e) {
+        }
+      } catch (final ObjectNotFoundException e) {
         // New file. Just check parent permission
         //
-        if (!hasParentRights) throw new AuthorizationException();
+        if (!hasParentRights) {
+          throw new AuthorizationException();
+        }
       }
       fm.store(parent, name, content);
       fm.chmod(parent, name, permissions);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public void deleteFile(long parent, String name)
+  @Override
+  public void deleteFile(final long parent, final String name)
       throws AuthorizationException, ObjectNotFoundException, UnexpectedException {
     try {
-      this.assertConferencePermission(parent, ConferencePermissions.WRITE_PERMISSION);
+      assertConferencePermission(parent, ConferencePermissions.WRITE_PERMISSION);
       m_da.getFileManager().delete(parent, name);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public String readSystemFile(String name)
+  @Override
+  public String readSystemFile(final String name)
       throws AuthorizationException, ObjectNotFoundException, UnexpectedException {
     try {
-      return this.readFile(m_da.getUserManager().getSysopId(), name);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+      return readFile(m_da.getUserManager().getSysopId(), name);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public void storeSystemFile(String name, String content)
+  @Override
+  public void storeSystemFile(final String name, final String content)
       throws AuthorizationException, UnexpectedException {
     try {
-      long parent = m_da.getUserManager().getSysopId();
-      this.storeFile(parent, name, content, FileProtection.ALLOW_READ);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
-    } catch (ObjectNotFoundException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+      final long parent = m_da.getUserManager().getSysopId();
+      storeFile(parent, name, content, FileProtection.ALLOW_READ);
+    } catch (final SQLException | ObjectNotFoundException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public void deleteSystemFile(String name)
+  @Override
+  public void deleteSystemFile(final String name)
       throws AuthorizationException, ObjectNotFoundException, UnexpectedException {
     try {
-      this.deleteFile(m_da.getUserManager().getSysopId(), name);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+      deleteFile(m_da.getUserManager().getSysopId(), name);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public void createUserFilter(long jinge, long flags)
+  @Override
+  public void createUserFilter(final long jinge, final long flags)
       throws ObjectNotFoundException, UnexpectedException {
     try {
-      long me = this.getLoggedInUserId();
-      RelationshipManager rm = m_da.getRelationshipManager();
-      Relationship[] r = rm.find(me, jinge, RelationshipKinds.FILTER);
-      if (r.length > 0) rm.changeFlags(r[0].getId(), flags);
-      else rm.addRelationship(me, jinge, RelationshipKinds.FILTER, flags);
+      final long me = getLoggedInUserId();
+      final RelationshipManager rm = m_da.getRelationshipManager();
+      final Relationship[] r = rm.find(me, jinge, RelationshipKinds.FILTER);
+      if (r.length > 0) {
+        rm.changeFlags(r[0].getId(), flags);
+      } else {
+        rm.addRelationship(me, jinge, RelationshipKinds.FILTER, flags);
+      }
 
       // Update cache
       //
-      m_userContext.getFilterCache().put(new Long(jinge), new Long(flags));
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+      m_userContext.getFilterCache().put(jinge, flags);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public void dropUserFilter(long user) throws ObjectNotFoundException, UnexpectedException {
+  @Override
+  public void dropUserFilter(final long user) throws ObjectNotFoundException, UnexpectedException {
     try {
-      RelationshipManager rm = m_da.getRelationshipManager();
-      Relationship[] r = rm.find(this.getLoggedInUserId(), user, RelationshipKinds.FILTER);
-      for (int idx = 0; idx < r.length; ++idx) rm.delete(r[idx].getId());
+      final RelationshipManager rm = m_da.getRelationshipManager();
+      final Relationship[] r = rm.find(getLoggedInUserId(), user, RelationshipKinds.FILTER);
+      for (final Relationship relationship : r) {
+        rm.delete(relationship.getId());
+      }
 
       // Update cache
       //
-      m_userContext.getFilterCache().remove(new Long(user));
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+      m_userContext.getFilterCache().remove(user);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
+  @Override
   public Relationship[] listFilters() throws UnexpectedException {
     try {
       return m_da.getRelationshipManager()
-          .listByRefererAndKind(this.getLoggedInUserId(), RelationshipKinds.FILTER);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+          .listByRefererAndKind(getLoggedInUserId(), RelationshipKinds.FILTER);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public NameAssociation[] listReaders(MessageLocator ml)
+  @Override
+  public NameAssociation[] listReaders(final MessageLocator ml)
       throws UnexpectedException, NoCurrentMessageException {
     try {
-      long globid = 0;
+      final long globid;
 
       if (null == ml) {
-        if (-1 == this.m_lastReadMessageId) throw new NoCurrentMessageException();
-        else globid = this.m_lastReadMessageId;
+        if (-1 == m_lastReadMessageId) {
+          throw new NoCurrentMessageException();
+        } else {
+          globid = m_lastReadMessageId;
+        }
       } else {
-        globid = this.localToGlobal(this.m_currentConferenceId, ml.getLocalnum());
+        globid = localToGlobal(m_currentConferenceId, ml.getLocalnum());
       }
 
       return m_da.getMembershipManager().listReaders(globid);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
-    } catch (ObjectNotFoundException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException | ObjectNotFoundException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
@@ -2880,6 +2935,7 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
     m_valid = false;
   }
 
+  @Override
   public boolean isValid() {
     return m_valid;
   }
@@ -2890,74 +2946,82 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
     m_userContext.saveMemberships(m_da.getMembershipManager());
   }
 
-  protected boolean markMessageAsReadEx(long conference, int localnum)
+  protected boolean markMessageAsReadEx(final long conference, final int localnum)
       throws ObjectNotFoundException {
     return m_userContext.getMemberships().markAsReadEx(conference, localnum);
   }
 
-  protected int performThreadOperation(long thread, int max, MessageOperation op)
+  protected int performThreadOperation(final long thread, final int max, final MessageOperation op)
       throws UnexpectedException, ObjectNotFoundException, SelectionOverflowException {
     try {
-      long[] ids = m_da.getMessageManager().selectByThread(thread, max);
-      int top = ids.length;
-      for (int idx = 0; idx < top; ++idx) op.perform(ids[idx]);
+      final long[] ids = m_da.getMessageManager().selectByThread(thread, max);
+      final int top = ids.length;
+      for (final long id : ids) {
+        op.perform(id);
+      }
       return top;
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  protected int performTreeOperation(long root, MessageOperation op)
+  protected int performTreeOperation(final long root, final MessageOperation op)
       throws UnexpectedException, ObjectNotFoundException {
     try {
-      MessageManager mm = m_da.getMessageManager();
-      Stack<Long> stack = new Stack<Long>();
+      final MessageManager mm = m_da.getMessageManager();
+      final Stack<Long> stack = new Stack<>();
       stack.add(root);
       int n = 0;
       for (; !stack.isEmpty(); ++n) {
         // Perform operation
         //
-        long id = stack.pop();
+        final long id = stack.pop();
         op.perform(id);
 
         // Push replies
         //
-        MessageHeader[] mh = mm.getReplies(id);
-        for (int idx = 0; idx < mh.length; idx++) stack.push(mh[idx].getId());
+        final MessageHeader[] mh = mm.getReplies(id);
+        for (final MessageHeader messageHeader : mh) {
+          stack.push(messageHeader.getId());
+        }
       }
       return n;
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  protected int performOperationBySubjectInConference(String subject, MessageOperation op)
+  protected int performOperationBySubjectInConference(
+      final String subject, final MessageOperation op)
       throws UnexpectedException, ObjectNotFoundException {
-    long currentConference = this.getCurrentConference().getId();
+    final long currentConference = getCurrentConference().getId();
     try {
-      MessageManager mm = m_da.getMessageManager();
-      int[] ids = mm.getLocalMessagesBySubject(subject, currentConference);
-      for (int idx = 0; idx < ids.length; ++idx)
-        op.perform(this.localToGlobalInCurrentConference(ids[idx]));
+      final MessageManager mm = m_da.getMessageManager();
+      final int[] ids = mm.getLocalMessagesBySubject(subject, currentConference);
+      for (final int id : ids) {
+        op.perform(localToGlobalInCurrentConference(id));
+      }
       return ids.length;
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  protected int performOperationBySubject(String subject, MessageOperation op)
+  protected int performOperationBySubject(final String subject, final MessageOperation op)
       throws UnexpectedException, ObjectNotFoundException {
     try {
-      MessageManager mm = m_da.getMessageManager();
-      long[] globalIds = mm.getMessagesBySubject(subject, this.getLoggedInUserId());
-      for (int idx = 0; idx < globalIds.length; ++idx) op.perform(globalIds[idx]);
+      final MessageManager mm = m_da.getMessageManager();
+      final long[] globalIds = mm.getMessagesBySubject(subject, getLoggedInUserId());
+      for (final long globalId : globalIds) {
+        op.perform(globalId);
+      }
       return globalIds.length;
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  protected void markMessageAsRead(long conference, int localnum) throws SQLException {
+  protected void markMessageAsRead(final long conference, final int localnum) throws SQLException {
     try {
       // Mark it as read in the membership list
       //
@@ -2967,13 +3031,14 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
       //
       m_lastReadMessageId = m_da.getMessageManager().getGlobalMessageId(conference, localnum);
 
-    } catch (ObjectNotFoundException e) {
+    } catch (final ObjectNotFoundException e) {
       // The text was probably deleted. Do nothing.
       //
     }
   }
 
-  public int rollbackReads(int n) throws UnexpectedException {
+  @Override
+  public int rollbackReads(final int n) throws UnexpectedException {
     long conf = -1;
     int count = 0;
     for (; count < n && m_readLog != null; m_readLog = m_readLog.getPrevious()) {
@@ -2981,7 +3046,7 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
       try {
         m_userContext.getMemberships().markAsUnread(conf, m_readLog.getLocalNum());
         ++count;
-      } catch (ObjectNotFoundException e) {
+      } catch (final ObjectNotFoundException e) {
         // The conference disappeared. Not much we can do!
       }
     }
@@ -2989,87 +3054,98 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
     // Go to the conference of the last unread message
     //
     try {
-      if (conf != -1) this.gotoConference(conf);
-    } catch (NotMemberException e) {
+      if (conf != -1) {
+        gotoConference(conf);
+      }
+    } catch (final NotMemberException e) {
       // We have signed off from that conference. Not much to do
-    } catch (ObjectNotFoundException e) {
+    } catch (final ObjectNotFoundException e) {
       // The conference disappeared. Not much we can do!
     }
     return count;
   }
 
-  public void assertConferencePermission(long conferenceId, int mask)
+  @Override
+  public void assertConferencePermission(final long conferenceId, final int mask)
       throws AuthorizationException, ObjectNotFoundException, UnexpectedException {
-    this.assertConferencePermission(this.getLoggedInUserId(), conferenceId, mask);
+    assertConferencePermission(getLoggedInUserId(), conferenceId, mask);
   }
 
-  public void assertConferencePermission(long userId, long conferenceId, int mask)
+  public void assertConferencePermission(final long userId, final long conferenceId, final int mask)
       throws AuthorizationException, ObjectNotFoundException, UnexpectedException {
-    if (!this.hasPermissionInConference(userId, conferenceId, mask)) {
+    if (!hasPermissionInConference(userId, conferenceId, mask)) {
       if (mask == ConferencePermissions.REPLY_PERMISSION) {
         throw new RepliesNotAllowedException(
-            new Object[] {this.getCensoredName(conferenceId).getName()});
+            new Object[] {getCensoredName(conferenceId).getName()});
       } else if (mask == ConferencePermissions.WRITE_PERMISSION) {
         throw new OriginalsNotAllowedException(
-            new Object[] {this.getCensoredName(conferenceId).getName()});
-      } else throw new AuthorizationException();
+            new Object[] {getCensoredName(conferenceId).getName()});
+      } else {
+        throw new AuthorizationException();
+      }
     }
   }
 
-  public void assertModifyConference(long conferenceId)
+  @Override
+  public void assertModifyConference(final long conferenceId)
       throws AuthorizationException, ObjectNotFoundException, UnexpectedException {
-    if (!(this.hasPermissionInConference(conferenceId, ConferencePermissions.ADMIN_PERMISSION)
-        || this.getLoggedInUser().hasRights(UserPermissions.CONFERENCE_ADMIN)))
+    if (!(hasPermissionInConference(conferenceId, ConferencePermissions.ADMIN_PERMISSION)
+        || getLoggedInUser().hasRights(UserPermissions.CONFERENCE_ADMIN))) {
       throw new AuthorizationException();
+    }
   }
 
-  protected void pushReplies(long conference, int localnum)
+  protected void pushReplies(final long conference, final int localnum)
       throws ObjectNotFoundException, UnexpectedException {
     try {
-      this.pushReplies(m_da.getMessageManager().getGlobalMessageId(conference, localnum));
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+      pushReplies(m_da.getMessageManager().getGlobalMessageId(conference, localnum));
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  protected void pushReplies(long messageId) throws ObjectNotFoundException, UnexpectedException {
+  protected void pushReplies(final long messageId) throws UnexpectedException {
     // Not reading in reply-tree-order? We're outta here!
     //
-    if ((this.getLoggedInUser().getFlags1() & UserFlags.READ_REPLY_TREE) == 0) return;
+    if ((getLoggedInUser().getFlags1() & UserFlags.READ_REPLY_TREE) == 0) {
+      return;
+    }
     try {
       long[] replies = m_da.getMessageManager().getReplyIds(messageId);
 
       // If we're not interested in replies across conferences, we have
       // to filter the list.
       //
-      if ((this.getLoggedInUser().getFlags1() & UserFlags.READ_CROSS_CONF_REPLIES) == 0) {
-        MessageManager mm = m_da.getMessageManager();
+      if ((getLoggedInUser().getFlags1() & UserFlags.READ_CROSS_CONF_REPLIES) == 0) {
+        final MessageManager mm = m_da.getMessageManager();
         int p = 0;
         for (int idx = 0; idx < replies.length; idx++) {
-          long reply = replies[idx];
+          final long reply = replies[idx];
           try {
-            mm.getOccurrenceInConference(this.getCurrentConferenceId(), reply);
+            mm.getOccurrenceInConference(getCurrentConferenceId(), reply);
             replies[p++] = reply;
-          } catch (ObjectNotFoundException e) {
+          } catch (final ObjectNotFoundException e) {
             // Skip...
           }
         }
         if (p != replies.length) {
-          long[] copy = replies;
+          final long[] copy = replies;
           replies = new long[p];
           System.arraycopy(copy, 0, replies, 0, p);
         }
       }
-      if (replies.length > 0) m_replyStack = new ReplyStackFrame(replies, m_replyStack);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+      if (replies.length > 0) {
+        m_replyStack = new ReplyStackFrame(replies, m_replyStack);
+      }
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  protected Envelope innerReadMessage(long globalId)
+  protected Envelope innerReadMessage(final long globalId)
       throws ObjectNotFoundException, UnexpectedException, NoCurrentMessageException,
           AuthorizationException {
-    return this.innerReadMessage(new MessageLocator(globalId));
+    return innerReadMessage(new MessageLocator(globalId));
   }
 
   protected Envelope innerReadMessage(MessageLocator locator)
@@ -3078,71 +3154,78 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
     try {
       // Check that we are allowed to read this
       //
-      locator = this.resolveLocator(locator);
-      this.assertMessageReadPermissions(locator.getGlobalId());
+      locator = resolveLocator(locator);
+      assertMessageReadPermissions(locator.getGlobalId());
 
       // Resolve reply to (if any)
       //
-      long conf = this.getCurrentConferenceId();
-      MessageManager mm = m_da.getMessageManager();
-      ConferenceManager cm = m_da.getConferenceManager();
-      Message message = mm.loadMessage(locator.getConference(), locator.getLocalnum());
-      long replyToId = message.getReplyTo();
+      final long conf = getCurrentConferenceId();
+      final MessageManager mm = m_da.getMessageManager();
+      final ConferenceManager cm = m_da.getConferenceManager();
+      final Message message = mm.loadMessage(locator.getConference(), locator.getLocalnum());
+      final long replyToId = message.getReplyTo();
       Envelope.RelatedMessage replyTo = null;
       if (replyToId > 0) {
         // This is a reply. Fill in info.
         //
-        MessageOccurrence occ =
-            mm.getMostRelevantOccurrence(this.getLoggedInUserId(), conf, replyToId);
-        MessageHeader replyToMh = mm.loadMessageHeader(replyToId);
+        final MessageOccurrence occ =
+            mm.getMostRelevantOccurrence(getLoggedInUserId(), conf, replyToId);
+        final MessageHeader replyToMh = mm.loadMessageHeader(replyToId);
         replyTo =
             new Envelope.RelatedMessage(
                 occ,
                 replyToMh.getAuthor(),
                 replyToMh.getAuthorName(),
                 occ.getConference(),
-                this.getCensoredName(occ.getConference()),
+                getCensoredName(occ.getConference()),
                 occ.getConference() == conf);
       }
 
       // Create receiver list
       //
-      MessageOccurrence[] occ = message.getOccurrences();
+      final MessageOccurrence[] occ = message.getOccurrences();
       int top = occ.length;
-      NameAssociation[] receivers = new NameAssociation[top];
-      for (int idx = 0; idx < top; ++idx)
+      final NameAssociation[] receivers = new NameAssociation[top];
+      for (int idx = 0; idx < top; ++idx) {
         receivers[idx] =
             new NameAssociation(
-                occ[idx].getConference(), this.getCensoredName(occ[idx].getConference()));
+                occ[idx].getConference(), getCensoredName(occ[idx].getConference()));
+      }
 
       // Create attributes list
       //
-      MessageAttribute[] attr = mm.getMessageAttributes(message.getId());
+      final MessageAttribute[] attr = mm.getMessageAttributes(message.getId());
 
       // Create list of replies
       //
-      MessageHeader[] replyHeaders = mm.getReplies(message.getId());
+      final MessageHeader[] replyHeaders = mm.getReplies(message.getId());
       top = replyHeaders.length;
-      ArrayList<Envelope.RelatedMessage> list = new ArrayList<Envelope.RelatedMessage>(top);
+      final ArrayList<Envelope.RelatedMessage> list = new ArrayList<>(top);
 
       for (int idx = 0; idx < top; ++idx) {
-        MessageHeader each = replyHeaders[idx];
-        MessageOccurrence replyOcc =
-            mm.getMostRelevantOccurrence(this.getLoggedInUserId(), conf, each.getId());
+        final MessageHeader each = replyHeaders[idx];
+        final MessageOccurrence replyOcc =
+            mm.getMostRelevantOccurrence(getLoggedInUserId(), conf, each.getId());
 
         // Don't show replies written by filtered users
         //
-        if (m_userContext.userMatchesFilter(each.getAuthor(), FilterFlags.MESSAGES)) continue;
+        if (m_userContext.userMatchesFilter(each.getAuthor(), FilterFlags.MESSAGES)) {
+          continue;
+        }
 
         // Don't show personal replies
         //
-        if (cm.isMailbox(replyOcc.getConference())) continue;
+        if (cm.isMailbox(replyOcc.getConference())) {
+          continue;
+        }
 
         // Don't show replies in conferences we're not allowed to see
         //
-        if (this.getName(replyOcc.getConference()).getVisibility() == Visibilities.PROTECTED
-            && !this.hasPermissionInConference(
-                replyOcc.getConference(), ConferencePermissions.READ_PERMISSION)) continue;
+        if (getName(replyOcc.getConference()).getVisibility() == Visibilities.PROTECTED
+            && !hasPermissionInConference(
+                replyOcc.getConference(), ConferencePermissions.READ_PERMISSION)) {
+          continue;
+        }
 
         // Add to list
         //
@@ -3152,27 +3235,29 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
                 each.getAuthor(),
                 each.getAuthorName(),
                 replyOcc.getConference(),
-                this.getCensoredName(replyOcc.getConference()),
+                getCensoredName(replyOcc.getConference()),
                 replyOcc.getConference() == conf));
       }
-      Envelope.RelatedMessage[] replies = new Envelope.RelatedMessage[list.size()];
+      final Envelope.RelatedMessage[] replies = new Envelope.RelatedMessage[list.size()];
       list.toArray(replies);
 
       // Done assembling envelope. Now, mark the message as read in all
       // conferences where it appears and we are members.
       //
-      MessageOccurrence[] occs =
-          mm.getVisibleOccurrences(this.getLoggedInUserId(), locator.getGlobalId());
+      final MessageOccurrence[] occs =
+          mm.getVisibleOccurrences(getLoggedInUserId(), locator.getGlobalId());
       top = occs.length;
       for (int idx = 0; idx < top; ++idx) {
-        MessageOccurrence each = occs[idx];
-        this.markMessageAsRead(each.getConference(), each.getLocalnum());
+        final MessageOccurrence each = occs[idx];
+        markMessageAsRead(each.getConference(), each.getLocalnum());
       }
 
       // Put it in the read log. Notice that we log only one occurrence, as
       // it would confuse users if implicitly read occurences were included.
       //
-      if (top > 0) this.appendToReadLog(occs[0]);
+      if (top > 0) {
+        appendToReadLog(occs[0]);
+      }
 
       // Make this the "current" message
       //
@@ -3181,81 +3266,89 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
       // Create Envelope and return
       //
       m_stats.incNumRead();
-      return new Envelope(
-          message, this.toOccurrence(locator), replyTo, receivers, occ, attr, replies);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+      return new Envelope(message, toOccurrence(locator), replyTo, receivers, occ, attr, replies);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
   /** Retrieves all message attributes, if any, of the given type for the given message. */
-  public MessageAttribute[] getMatchingMessageAttributes(long message, short kind)
+  @Override
+  public MessageAttribute[] getMatchingMessageAttributes(final long message, final short kind)
       throws UnexpectedException {
     try {
       return kind == -1
           ? m_da.getMessageManager().getMessageAttributes(message)
           : m_da.getMessageManager().getMatchingMessageAttributes(message, kind);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
   /** Retrieves all message attributes for a given message */
-  public MessageAttribute[] getMessageAttributes(long message) throws UnexpectedException {
+  @Override
+  public MessageAttribute[] getMessageAttributes(final long message) throws UnexpectedException {
     return getMatchingMessageAttributes(message, (short) -1);
   }
 
   /** Checks that at least one occurrence of the message is readable to the logged in user. */
-  protected void assertMessageReadPermissions(long globalId)
+  protected void assertMessageReadPermissions(final long globalId)
       throws AuthorizationException, ObjectNotFoundException, UnexpectedException {
-    if (!hasMessageReadPermissions(globalId)) throw new AuthorizationException();
+    if (!hasMessageReadPermissions(globalId)) {
+      throw new AuthorizationException();
+    }
   }
 
   /** Checks that at least one occurrence of the message is readable to the logged in user. */
-  protected boolean hasMessageReadPermissions(long globalId)
+  protected boolean hasMessageReadPermissions(final long globalId)
       throws ObjectNotFoundException, UnexpectedException {
     try {
       // Get all occurrences
       //
-      MessageManager mm = m_da.getMessageManager();
-      MembershipManager mbrMgr = m_da.getMembershipManager();
-      MessageOccurrence[] occs = mm.getOccurrences(globalId);
-      long me = this.getLoggedInUserId();
+      final MessageManager mm = m_da.getMessageManager();
+      final MembershipManager mbrMgr = m_da.getMembershipManager();
+      final MessageOccurrence[] occs = mm.getOccurrences(globalId);
+      final long me = getLoggedInUserId();
 
       // Check whether we have read access in at least one of them
       // Treat no occurrences at all as an object not found, rather than
       // authorization problem
       //
-      int top = occs.length;
-      if (top == 0) throw new ObjectNotFoundException("Messageid=" + globalId);
+      final int top = occs.length;
+      if (top == 0) {
+        throw new ObjectNotFoundException("Messageid=" + globalId);
+      }
 
-      for (int idx = 0; idx < top; ++idx) {
+      for (final MessageOccurrence occ : occs) {
         // Get out of here as soon as we have read access in a conference
         // where this text occurrs.
         //
-        if (mbrMgr.hasPermission(
-            me, occs[idx].getConference(), ConferencePermissions.READ_PERMISSION)) return true;
+        if (mbrMgr.hasPermission(me, occ.getConference(), ConferencePermissions.READ_PERMISSION)) {
+          return true;
+        }
       }
 
       // We didn't find an occurrence in a conference we have access to?
       // We're not allowed to see it, then!
       //
       return false;
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  protected long popReply() throws ObjectNotFoundException, UnexpectedException, SQLException {
-    return this.peekReply() != -1 ? m_replyStack.pop() : -1;
+  protected long popReply() throws UnexpectedException, SQLException {
+    return peekReply() != -1 ? m_replyStack.pop() : -1;
   }
 
   protected long peekReply() throws SQLException, UnexpectedException {
-    long reply = -1;
+    long reply;
 
     // Do we have anything at all in the stack?
     //
-    if (m_replyStack == null) return -1;
+    if (m_replyStack == null) {
+      return -1;
+    }
 
     // Loop until we have an unread reply
     //
@@ -3263,52 +3356,64 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
 
       // Frame exhausted? Try next!
       //
-      if (!m_replyStack.hasMore()) m_replyStack = m_replyStack.next();
-      if (m_replyStack == null) return -1;
+      if (!m_replyStack.hasMore()) {
+        m_replyStack = m_replyStack.next();
+      }
+      if (m_replyStack == null) {
+        return -1;
+      }
 
       // Fetch next reply global id and translate into local occurrence
       //
       reply = m_replyStack.peek();
       try {
-        MessageOccurrence occ =
+        final MessageOccurrence occ =
             m_da.getMessageManager()
-                .getMostRelevantOccurrence(this.getLoggedInUserId(), m_currentConferenceId, reply);
+                .getMostRelevantOccurrence(getLoggedInUserId(), m_currentConferenceId, reply);
 
         // Check that we have permission to see this one
         //
-        if (!this.hasMessageReadPermissions(reply)) continue;
+        if (!hasMessageReadPermissions(reply)) {
+          continue;
+        }
 
         // If it's unread, we're done
         //
-        if (m_userContext.getMemberships().isUnread(occ.getConference(), occ.getLocalnum())) break;
-      } catch (ObjectNotFoundException e) {
+        if (m_userContext.getMemberships().isUnread(occ.getConference(), occ.getLocalnum())) {
+          break;
+        }
+      } catch (final ObjectNotFoundException e) {
         // Not found. Probably deleted, so just skip it!
       }
     }
     return reply;
   }
 
-  protected void setDataAccess(DataAccess da) {
+  protected void setDataAccess(final DataAccess da) {
     m_da = da;
   }
 
-  protected void appendToReadLog(MessageOccurrence occ) {
+  protected void appendToReadLog(final MessageOccurrence occ) {
     m_readLog = new ReadLogItem(m_readLog, occ.getConference(), occ.getLocalnum());
   }
 
-  public void checkRights(long mask) throws AuthorizationException {
-    if (!this.getLoggedInUser().hasRights(mask)) throw new AuthorizationException();
+  @Override
+  public void checkRights(final long mask) throws AuthorizationException {
+    if (!getLoggedInUser().hasRights(mask)) {
+      throw new AuthorizationException();
+    }
   }
 
-  public boolean checkForUserid(String userid) throws UnexpectedException {
-    UserManager um = m_da.getUserManager();
+  @Override
+  public boolean checkForUserid(final String userid) throws UnexpectedException {
+    final UserManager um = m_da.getUserManager();
     try {
       um.getUserIdByLogin(userid);
       return true;
-    } catch (ObjectNotFoundException e) {
+    } catch (final ObjectNotFoundException e) {
       return false;
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
@@ -3318,7 +3423,7 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
    * @param userId
    * @param e The event
    */
-  protected void sendEvent(long userId, Event e) {
+  protected void sendEvent(final long userId, final Event e) {
     // Push events onto a transaction-local queue that will
     // be flushed once the current transaction is committed.
     //
@@ -3333,8 +3438,9 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
 
   protected void flushEvents() {
     synchronized (m_deferredEvents) {
-      for (Iterator<DeferredEvent> itor = m_deferredEvents.iterator(); itor.hasNext(); )
-        itor.next().dispatch(m_sessions);
+      for (final DeferredEvent m_deferredEvent : m_deferredEvents) {
+        m_deferredEvent.dispatch(m_sessions);
+      }
       m_deferredEvents.clear();
     }
   }
@@ -3348,7 +3454,7 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
    *
    * @param e The event
    */
-  protected void broadcastEvent(Event e) {
+  protected void broadcastEvent(final Event e) {
     // Push events onto a transaction-local queue that will
     // be flushed once the current transaction is committed.
     //
@@ -3359,109 +3465,136 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
 
   // Implementation of EventTarget
   //
-  public void onEvent(Event e) {
+  @Override
+  public void onEvent(final Event e) {
     // Catch-all method for events without a dedicated methods.
     // Just stuff it in the queue
     //
-    this.postEvent(e);
+    postEvent(e);
   }
 
-  public void onEvent(ChatMessageEvent e) {
-    if (this.allowsChatInEventHandler(e.getOriginatingUser())) this.postEvent(e);
-  }
-
-  public void onEvent(ChatAnonymousMessageEvent e) {
-    if (this.allowsChatInEventHandler(e.getOriginatingUser())) this.postEvent(e);
-  }
-
-  public void onEvent(BroadcastMessageEvent e) {
-    if (this.allowsBroadcastInEventHandler(e.getOriginatingUser())) this.postEvent(e);
-  }
-
-  public void onEvent(BroadcastAnonymousMessageEvent e) {
-    if (this.allowsBroadcastInEventHandler(e.getOriginatingUser())) this.postEvent(e);
-  }
-
-  public void onEvent(UserAttendanceEvent e) {
-    UserInfo ui = this.getLoggedInUserInEventHandler();
-    if (ui.testFlags(0, UserFlags.SHOW_ATTENDANCE_MESSAGES)
-        && (e.getType() != UserAttendanceEvent.AWOKE
-            || ui.testFlags(0, UserFlags.SHOW_END_OF_IDLE_MESSAGE))) this.postEvent(e);
-  }
-
-  public void onEvent(ReloadUserProfileEvent e) {
-    // Just post it!
-    //
-    this.postEvent(e);
-  }
-
-  public void onEvent(MessageDeletedEvent e) {
-    long conf = e.getConference();
-    try {
-      m_userContext.getMemberships().get(conf);
-      this.postEvent(e);
-    } catch (ObjectNotFoundException ex) {
-      // Not member. No need to notify client
-      //
-      return;
+  @Override
+  public void onEvent(final ChatMessageEvent e) {
+    if (allowsChatInEventHandler(e.getOriginatingUser())) {
+      postEvent(e);
     }
   }
 
-  public synchronized void onEvent(NewMessageEvent e) {
+  @Override
+  public void onEvent(final ChatAnonymousMessageEvent e) {
+    if (allowsChatInEventHandler(e.getOriginatingUser())) {
+      postEvent(e);
+    }
+  }
+
+  @Override
+  public void onEvent(final BroadcastMessageEvent e) {
+    if (allowsBroadcastInEventHandler(e.getOriginatingUser())) {
+      postEvent(e);
+    }
+  }
+
+  @Override
+  public void onEvent(final BroadcastAnonymousMessageEvent e) {
+    if (allowsBroadcastInEventHandler(e.getOriginatingUser())) {
+      postEvent(e);
+    }
+  }
+
+  @Override
+  public void onEvent(final UserAttendanceEvent e) {
+    final UserInfo ui = getLoggedInUserInEventHandler();
+    if (ui.testFlags(0, UserFlags.SHOW_ATTENDANCE_MESSAGES)
+        && (e.getType() != UserAttendanceEvent.AWOKE
+            || ui.testFlags(0, UserFlags.SHOW_END_OF_IDLE_MESSAGE))) {
+      postEvent(e);
+    }
+  }
+
+  @Override
+  public void onEvent(final ReloadUserProfileEvent e) {
+    // Just post it!
+    //
+    postEvent(e);
+  }
+
+  @Override
+  public void onEvent(final MessageDeletedEvent e) {
+    final long conf = e.getConference();
+    try {
+      m_userContext.getMemberships().get(conf);
+      postEvent(e);
+    } catch (final ObjectNotFoundException ex) {
+      // Not member. No need to notify client
+      //
+    }
+  }
+
+  @Override
+  public synchronized void onEvent(final NewMessageEvent e) {
     // Is this a new text in our mailbox? Then we're definately interested in it
     // and should always pass it on!
     //
-    boolean debug = Logger.isDebugEnabled(this);
-    if (e.getConference() == this.getLoggedInUserId()) {
-      if (debug) Logger.debug(this, "New mail. Passing event to client");
-      this.postEvent(e);
+    final boolean debug = Logger.isDebugEnabled(this);
+    if (e.getConference() == getLoggedInUserId()) {
+      if (debug) {
+        Logger.debug(this, "New mail. Passing event to client");
+      }
+      postEvent(e);
       return;
     }
 
     // Already have unread messages? No need to send event!
     //
-    if (debug) Logger.debug(this, "NewMessageEvent received. Conf=" + e.getConference());
+    if (debug) {
+      Logger.debug(this, "NewMessageEvent received. Conf=" + e.getConference());
+    }
     if (m_lastSuggestedCommand == CommandSuggestions.NEXT_MESSAGE
         || m_lastSuggestedCommand == CommandSuggestions.NEXT_REPLY) {
-      if (debug)
+      if (debug) {
         Logger.debug(this, "Event ignored since we already have an unread text in this conference");
+      }
       return;
     }
 
     // Don't send notification unless we're members.
     //
-    long conf = e.getConference();
+    final long conf = e.getConference();
     try {
       // Last suggested command was NEXT_CONFERENCE and message
       // was not posted in current conference? No need to pass it on.
       //
       if (m_lastSuggestedCommand == CommandSuggestions.NEXT_CONFERENCE
-          && conf != this.getCurrentConferenceId()) {
-        if (debug)
+          && conf != getCurrentConferenceId()) {
+        if (debug) {
           Logger.debug(
               this, "Event ignored because we're already suggesting going to the next conference");
+        }
         return;
       }
 
       // Try to load the membership to see if we should care.
       //
       m_userContext.getMemberships().get(conf);
-      if (debug) Logger.debug(this, "Passing event to client");
-      this.postEvent(e);
-    } catch (ObjectNotFoundException ex) {
+      if (debug) {
+        Logger.debug(this, "Passing event to client");
+      }
+      postEvent(e);
+    } catch (final ObjectNotFoundException ex) {
       // Not a member. No need to notify client
       //
-      if (debug)
+      if (debug) {
         Logger.debug(
             this, "Event ignored because we're not members where the new message was posted");
+      }
       return;
     }
   }
 
-  protected UserInfo getUserInEventHandler(long user) {
+  protected UserInfo getUserInEventHandler(final long user) {
     // Borrow a UserManager from the pool
     //
-    DataAccessPool pool = DataAccessPool.instance();
+    final DataAccessPool pool = DataAccessPool.instance();
     DataAccess da = null;
     try {
       da = pool.getDataAccess();
@@ -3469,152 +3602,167 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
       // Load user
       //
       return da.getUserManager().loadUser(user);
-    } catch (Exception e) {
+    } catch (final Exception e) {
       // We're called from an event handler, so what can we do?
       //
       Logger.error(this, "Error in event handler", e);
       return null;
     } finally {
-      if (da != null) pool.returnDataAccess(da);
+      if (da != null) {
+        pool.returnDataAccess(da);
+      }
     }
   }
 
   protected UserInfo getLoggedInUserInEventHandler() {
-    return this.getUserInEventHandler(this.getLoggedInUserId());
+    return getUserInEventHandler(getLoggedInUserId());
   }
 
-  protected boolean testUserFlagInEventHandler(long user, int flagword, long mask) {
-    UserInfo ui = this.getUserInEventHandler(user);
-    if (ui == null) return false;
+  protected boolean testUserFlagInEventHandler(
+      final long user, final int flagword, final long mask) {
+    final UserInfo ui = getUserInEventHandler(user);
+    if (ui == null) {
+      return false;
+    }
     return ui.testFlags(flagword, mask);
   }
 
-  public LocalMessageSearchResult[] listAllMessagesLocally(long conference, int start, int length)
-      throws UnexpectedException {
+  @Override
+  public LocalMessageSearchResult[] listAllMessagesLocally(
+      final long conference, final int start, final int length) throws UnexpectedException {
     try {
       return m_da.getMessageManager().listAllMessagesLocally(conference, start, length);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
+  @Override
   public LocalMessageSearchResult[] listMessagesLocallyByAuthor(
-      long conference, long user, int offset, int length) throws UnexpectedException {
-    try {
-      return m_da.getMessageManager().listMessagesLocallyByAuthor(conference, user, offset, length);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
-    }
-  }
-
-  public GlobalMessageSearchResult[] listMessagesGloballyByAuthor(long user, int offset, int length)
+      final long conference, final long user, final int offset, final int length)
       throws UnexpectedException {
     try {
-      return this.removeDuplicateMessages(
-          this.censorMessages(
-              m_da.getMessageManager().listMessagesGloballyByAuthor(user, offset, length)));
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
-    } catch (ObjectNotFoundException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+      return m_da.getMessageManager().listMessagesLocallyByAuthor(conference, user, offset, length);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public MessageHeader getMessageHeader(MessageLocator locator)
+  @Override
+  public GlobalMessageSearchResult[] listMessagesGloballyByAuthor(
+      final long user, final int offset, final int length) throws UnexpectedException {
+    try {
+      return removeDuplicateMessages(
+          censorMessages(
+              m_da.getMessageManager().listMessagesGloballyByAuthor(user, offset, length)));
+    } catch (final SQLException | ObjectNotFoundException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
+    }
+  }
+
+  @Override
+  public MessageHeader getMessageHeader(final MessageLocator locator)
       throws ObjectNotFoundException, AuthorizationException, NoCurrentMessageException,
           UnexpectedException {
-    long globalId = this.resolveLocator(locator).getGlobalId();
-    this.assertMessageReadPermissions(globalId);
+    final long globalId = resolveLocator(locator).getGlobalId();
+    assertMessageReadPermissions(globalId);
     try {
       return m_da.getMessageManager().loadMessageHeader(globalId);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public void deleteConference(long conference) throws AuthorizationException, UnexpectedException {
+  @Override
+  public void deleteConference(final long conference)
+      throws AuthorizationException, UnexpectedException {
     try {
       // Do we have the right to do this?
       //
-      this.assertModifyConference(conference);
+      assertModifyConference(conference);
 
       // So far so, so good. Go ahead and delete!
       //
       m_da.getMessageManager().deleteConference(conference);
       m_da.getNameManager().dropNamedObject(conference);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
-    } catch (ObjectNotFoundException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException | ObjectNotFoundException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public Envelope getLastRulePostingInConference(long conference)
+  @Override
+  public Envelope getLastRulePostingInConference(final long conference)
       throws ObjectNotFoundException, NoRulesException, UnexpectedException,
           AuthorizationException {
     try {
-      return this.readMessage(
+      return readMessage(
           new MessageLocator(
               conference,
               m_da.getMessageManager()
                   .findLastOccurrenceInConferenceWithAttrStmt(
                       MessageAttributes.RULEPOST, conference)));
-    } catch (NoCurrentMessageException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
-    } catch (SQLException e) {
+    } catch (final NoCurrentMessageException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
+    } catch (final SQLException e) {
       throw new NoRulesException();
     }
   }
 
+  @Override
   public Envelope getLastRulePosting()
       throws ObjectNotFoundException, NoRulesException, UnexpectedException,
           AuthorizationException {
-    return getLastRulePostingInConference(this.m_currentConferenceId);
+    return getLastRulePostingInConference(m_currentConferenceId);
   }
 
-  public MessageOccurrence storeRulePosting(UnstoredMessage msg)
+  @Override
+  public MessageOccurrence storeRulePosting(final UnstoredMessage msg)
       throws AuthorizationException, UnexpectedException, ObjectNotFoundException {
     try {
-      MessageOccurrence mo = this.storeMessage(m_currentConferenceId, msg);
+      final MessageOccurrence mo = storeMessage(m_currentConferenceId, msg);
       m_da.getMessageManager()
           .addMessageAttribute(mo.getGlobalId(), MessageAttributes.RULEPOST, null);
       return mo;
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public void changeSetting(String name, String value)
+  @Override
+  public void changeSetting(final String name, final String value)
       throws AuthorizationException, UnexpectedException {
     try {
-      this.checkRights(UserPermissions.ADMIN);
+      checkRights(UserPermissions.ADMIN);
       m_da.getSettingManager().changeSetting(name, value, 0);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public void changeSetting(String name, long value)
+  @Override
+  public void changeSetting(final String name, final long value)
       throws AuthorizationException, UnexpectedException {
     try {
-      this.checkRights(UserPermissions.ADMIN);
+      checkRights(UserPermissions.ADMIN);
       m_da.getSettingManager().changeSetting(name, null, value);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
+  @Override
   public void updateLastlogin() throws ObjectNotFoundException, UnexpectedException {
     try {
-      m_da.getUserManager().updateLastlogin(this.getLoggedInUserId());
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+      m_da.getUserManager().updateLastlogin(getLoggedInUserId());
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
+  @Override
   public SystemInformation getSystemInformation() throws UnexpectedException {
     try {
-      CacheManager cm = CacheManager.instance();
+      final CacheManager cm = CacheManager.instance();
       return new SystemInformation(
           m_sessions.canLogin(),
           cm.getNameCache().getStatistics(),
@@ -3624,79 +3772,84 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
           m_da.getUserManager().countUsers(),
           m_da.getConferenceManager().countConferences(),
           m_da.getMessageManager().countMessages());
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
+  @Override
   public GlobalMessageSearchResult[] searchMessagesGlobally(
-      String searchterm, int offset, int length) throws UnexpectedException {
+      final String searchterm, final int offset, final int length) throws UnexpectedException {
     try {
-      return this.removeDuplicateMessages(
-          this.censorMessages(
+      return removeDuplicateMessages(
+          censorMessages(
               m_da.getMessageManager().searchMessagesGlobally(searchterm, offset, length)));
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
-    } catch (ObjectNotFoundException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException | ObjectNotFoundException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
+  @Override
   public LocalMessageSearchResult[] searchMessagesLocally(
-      long conference, String searchterm, int offset, int length) throws UnexpectedException {
+      final long conference, final String searchterm, final int offset, final int length)
+      throws UnexpectedException {
     try {
-      return this.removeDuplicateMessages(
+      return removeDuplicateMessages(
           m_da.getMessageManager().searchMessagesLocally(conference, searchterm, offset, length));
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
+  @Override
   public LocalMessageSearchResult[] grepMessagesLocally(
-      long conference, String searchterm, int offset, int length) throws UnexpectedException {
+      final long conference, final String searchterm, final int offset, final int length)
+      throws UnexpectedException {
     try {
-      return this.removeDuplicateMessages(
+      return removeDuplicateMessages(
           m_da.getMessageManager().grepMessagesLocally(conference, searchterm, offset, length));
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  protected boolean isVisibleFor(long conferenceId, long userId)
+  protected boolean isVisibleFor(final long conferenceId, final long userId)
       throws ObjectNotFoundException, UnexpectedException {
     try {
       return m_userContext.getMemberships().getOrNull(conferenceId) != null
           || m_da.getNameManager().getNameById(conferenceId).getVisibility() == Visibilities.PUBLIC
           || m_da.getMembershipManager()
               .hasPermission(userId, conferenceId, ConferencePermissions.READ_PERMISSION);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  protected boolean isVisible(long conferenceId)
+  protected boolean isVisible(final long conferenceId)
       throws ObjectNotFoundException, UnexpectedException {
-    return isVisibleFor(conferenceId, this.getLoggedInUserId());
+    return isVisibleFor(conferenceId, getLoggedInUserId());
   }
 
-  protected Name getCensoredName(long id) throws ObjectNotFoundException, UnexpectedException {
+  protected Name getCensoredName(final long id)
+      throws ObjectNotFoundException, UnexpectedException {
     try {
-      return this.isVisible(id)
+      return isVisible(id)
           ? m_da.getNameManager().getNameById(id)
           : new Name("", Visibilities.PROTECTED, NameManager.UNKNOWN_KIND);
 
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  private List<MessageSearchResult> innerRemoveDuplicateMessages(MessageSearchResult[] messages) {
+  private List<MessageSearchResult> innerRemoveDuplicateMessages(
+      final MessageSearchResult[] messages) {
     // The list is already sorted and we want to preserve the order, so we can
     // take the easy route to making thing unique.
     //
     long lastId = -1;
-    List<MessageSearchResult> answer = new ArrayList<MessageSearchResult>(messages.length);
-    for (MessageSearchResult each : messages) {
+    final List<MessageSearchResult> answer = new ArrayList<MessageSearchResult>(messages.length);
+    for (final MessageSearchResult each : messages) {
       if (each.getGlobalId() != lastId) {
         answer.add(each);
         lastId = each.getGlobalId();
@@ -3706,30 +3859,31 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
   }
 
   protected GlobalMessageSearchResult[] removeDuplicateMessages(
-      GlobalMessageSearchResult[] messages) {
-    List<MessageSearchResult> result = this.innerRemoveDuplicateMessages(messages);
+      final GlobalMessageSearchResult[] messages) {
+    final List<MessageSearchResult> result = innerRemoveDuplicateMessages(messages);
     return result.toArray(new GlobalMessageSearchResult[result.size()]);
   }
 
   protected LocalMessageSearchResult[] removeDuplicateMessages(
-      LocalMessageSearchResult[] messages) {
-    List<MessageSearchResult> result = this.innerRemoveDuplicateMessages(messages);
+      final LocalMessageSearchResult[] messages) {
+    final List<MessageSearchResult> result = innerRemoveDuplicateMessages(messages);
     return result.toArray(new LocalMessageSearchResult[result.size()]);
   }
 
-  protected GlobalMessageSearchResult[] censorMessages(GlobalMessageSearchResult[] messages)
+  protected GlobalMessageSearchResult[] censorMessages(final GlobalMessageSearchResult[] messages)
       throws ObjectNotFoundException, UnexpectedException {
     return (GlobalMessageSearchResult[])
         FilterUtils.applyFilter(
             messages,
             new FilterUtils.Filter() {
-              public boolean include(Object obj) throws UnexpectedException {
+              @Override
+              public boolean include(final Object obj) throws UnexpectedException {
                 try {
-                  GlobalMessageSearchResult gms = (GlobalMessageSearchResult) obj;
-                  return ServerSessionImpl.this.hasMessageReadPermissions(gms.getGlobalId())
-                      && !ServerSessionImpl.this.m_userContext.userMatchesFilter(
+                  final GlobalMessageSearchResult gms = (GlobalMessageSearchResult) obj;
+                  return hasMessageReadPermissions(gms.getGlobalId())
+                      && !m_userContext.userMatchesFilter(
                           gms.getAuthor().getId(), FilterFlags.MESSAGES);
-                } catch (ObjectNotFoundException e) {
+                } catch (final ObjectNotFoundException e) {
                   // Not found? Certainly not to be included!
                   //
                   Logger.error(this, e);
@@ -3739,16 +3893,17 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
             });
   }
 
-  protected NameAssociation[] censorNames(NameAssociation[] names)
+  protected NameAssociation[] censorNames(final NameAssociation[] names)
       throws ObjectNotFoundException, UnexpectedException {
     return (NameAssociation[])
         FilterUtils.applyFilter(
             names,
             new FilterUtils.Filter() {
-              public boolean include(Object obj) throws UnexpectedException {
+              @Override
+              public boolean include(final Object obj) throws UnexpectedException {
                 try {
-                  return ServerSessionImpl.this.isVisible(((NameAssociation) obj).getId());
-                } catch (ObjectNotFoundException e) {
+                  return isVisible(((NameAssociation) obj).getId());
+                } catch (final ObjectNotFoundException e) {
                   // Not found? Certainly not visible!
                   //
                   Logger.error(this, e);
@@ -3758,9 +3913,9 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
             });
   }
 
-  protected boolean allowsChatInEventHandler(long sender) {
+  protected boolean allowsChatInEventHandler(final long sender) {
     try {
-      DataAccess da = DataAccessPool.instance().getDataAccess();
+      final DataAccess da = DataAccessPool.instance().getDataAccess();
       try {
         return m_userContext.allowsChat(da.getUserManager(), sender);
       } finally {
@@ -3770,15 +3925,15 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
           DataAccessPool.instance().returnDataAccess(da);
         }
       }
-    } catch (Exception e) {
+    } catch (final Exception e) {
       Logger.error(this, "Error in event handler", e);
       return false;
     }
   }
 
-  protected boolean allowsBroadcastInEventHandler(long sender) {
+  protected boolean allowsBroadcastInEventHandler(final long sender) {
     try {
-      DataAccess da = DataAccessPool.instance().getDataAccess();
+      final DataAccess da = DataAccessPool.instance().getDataAccess();
       try {
         return m_userContext.allowsBroadcast(da.getUserManager(), sender);
       } finally {
@@ -3788,60 +3943,61 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
           DataAccessPool.instance().returnDataAccess(da);
         }
       }
-    } catch (Exception e) {
+    } catch (final Exception e) {
       Logger.error(this, "Error in event handler", e);
       return false;
     }
   }
 
-  protected void innerMarkAsUnreadAtLogoutInCurrentConference(int localnum)
+  protected void innerMarkAsUnreadAtLogoutInCurrentConference(final int localnum)
       throws UnexpectedException {
-    m_pendingUnreads = new ReadLogItem(m_pendingUnreads, this.getCurrentConferenceId(), localnum);
+    m_pendingUnreads = new ReadLogItem(m_pendingUnreads, getCurrentConferenceId(), localnum);
   }
 
-  protected void innerMarkAsUnreadAtLogout(long messageId) throws UnexpectedException {
+  protected void innerMarkAsUnreadAtLogout(final long messageId) throws UnexpectedException {
     try {
-      MessageOccurrence occ =
+      final MessageOccurrence occ =
           m_da.getMessageManager()
-              .getMostRelevantOccurrence(
-                  this.getLoggedInUserId(), this.getCurrentConferenceId(), messageId);
+              .getMostRelevantOccurrence(getLoggedInUserId(), getCurrentConferenceId(), messageId);
       m_pendingUnreads = new ReadLogItem(m_pendingUnreads, occ.getConference(), occ.getLocalnum());
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
-    } catch (ObjectNotFoundException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
+    } catch (final ObjectNotFoundException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
   protected void saveUnreadMarkers() throws UnexpectedException {
     try {
-      StringBuffer content = new StringBuffer();
+      final StringBuffer content = new StringBuffer();
       for (ReadLogItem each = m_pendingUnreads; each != null; each = each.getPrevious()) {
         content.append(each.externalizeToString());
-        if (each.getPrevious() != null) content.append(',');
+        if (each.getPrevious() != null) {
+          content.append(',');
+        }
       }
-      FileManager fm = m_da.getFileManager();
-      fm.store(this.getLoggedInUserId(), ".unread", content.toString());
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+      final FileManager fm = m_da.getFileManager();
+      fm.store(getLoggedInUserId(), ".unread", content.toString());
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
   protected void loadUnreadMarkers() throws ObjectNotFoundException, UnexpectedException {
     try {
-      FileManager fm = m_da.getFileManager();
-      String content = fm.read(this.getLoggedInUserId(), ".unread");
-      for (StringTokenizer st = new StringTokenizer(content, ","); st.hasMoreTokens(); ) {
-        String each = st.nextToken();
-        int p = each.indexOf(':');
-        String confStr = each.substring(0, p);
-        String localNumStr = each.substring(p + 1);
+      final FileManager fm = m_da.getFileManager();
+      final String content = fm.read(getLoggedInUserId(), ".unread");
+      for (final StringTokenizer st = new StringTokenizer(content, ","); st.hasMoreTokens(); ) {
+        final String each = st.nextToken();
+        final int p = each.indexOf(':');
+        final String confStr = each.substring(0, p);
+        final String localNumStr = each.substring(p + 1);
         m_pendingUnreads =
             new ReadLogItem(
                 m_pendingUnreads, Long.parseLong(confStr), Integer.parseInt(localNumStr));
       }
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
@@ -3851,7 +4007,7 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
         m_userContext
             .getMemberships()
             .markAsUnread(m_pendingUnreads.getConference(), m_pendingUnreads.getLocalNum());
-      } catch (ObjectNotFoundException e) {
+      } catch (final ObjectNotFoundException e) {
         // The conference or message was deleted. Just ignore
         //
       }
@@ -3859,225 +4015,256 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
 
     // Delete backup file (if exists)
     //
-    FileManager fm = m_da.getFileManager();
+    final FileManager fm = m_da.getFileManager();
     try {
-      fm.delete(this.getLoggedInUserId(), ".unread");
-    } catch (ObjectNotFoundException e) {
+      fm.delete(getLoggedInUserId(), ".unread");
+    } catch (final ObjectNotFoundException e) {
       // No file to delete, no big deal!
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public long countMessagesLocallyByAuthor(long conference, long user)
+  @Override
+  public long countMessagesLocallyByAuthor(final long conference, final long user)
       throws UnexpectedException, AuthorizationException, ObjectNotFoundException {
     try {
-      this.assertConferencePermission(conference, ConferencePermissions.READ_PERMISSION);
-      MessageManager mm = m_da.getMessageManager();
+      assertConferencePermission(conference, ConferencePermissions.READ_PERMISSION);
+      final MessageManager mm = m_da.getMessageManager();
       return mm.countMessagesLocallyByAuthor(conference, user);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public long countMessagesGloballyByAuthor(long user) throws UnexpectedException {
+  @Override
+  public long countMessagesGloballyByAuthor(final long user) throws UnexpectedException {
     try {
-      MessageManager mm = m_da.getMessageManager();
-      return mm.countMessagesGloballyByAuthor(user, this.getLoggedInUserId());
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+      final MessageManager mm = m_da.getMessageManager();
+      return mm.countMessagesGloballyByAuthor(user, getLoggedInUserId());
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public long countSearchMessagesGlobally(String searchterm) throws UnexpectedException {
+  @Override
+  public long countSearchMessagesGlobally(final String searchterm) throws UnexpectedException {
     try {
-      MessageManager mm = m_da.getMessageManager();
-      return mm.countSearchMessagesGlobally(searchterm, this.getLoggedInUserId());
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+      final MessageManager mm = m_da.getMessageManager();
+      return mm.countSearchMessagesGlobally(searchterm, getLoggedInUserId());
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public long countGrepMessagesLocally(long conference, String searchterm)
+  @Override
+  public long countGrepMessagesLocally(final long conference, final String searchterm)
       throws UnexpectedException, AuthorizationException, ObjectNotFoundException {
     try {
-      this.assertConferencePermission(conference, ConferencePermissions.READ_PERMISSION);
-      MessageManager mm = m_da.getMessageManager();
+      assertConferencePermission(conference, ConferencePermissions.READ_PERMISSION);
+      final MessageManager mm = m_da.getMessageManager();
       return mm.countGrepMessagesLocally(conference, searchterm);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public long countSearchMessagesLocally(long conference, String searchterm)
+  @Override
+  public long countSearchMessagesLocally(final long conference, final String searchterm)
       throws UnexpectedException, AuthorizationException, ObjectNotFoundException {
     try {
-      this.assertConferencePermission(conference, ConferencePermissions.READ_PERMISSION);
-      MessageManager mm = m_da.getMessageManager();
+      assertConferencePermission(conference, ConferencePermissions.READ_PERMISSION);
+      final MessageManager mm = m_da.getMessageManager();
       return mm.countSearchMessagesLocally(conference, searchterm);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public long countAllMessagesLocally(long conference)
+  @Override
+  public long countAllMessagesLocally(final long conference)
       throws UnexpectedException, AuthorizationException, ObjectNotFoundException {
     try {
-      this.assertConferencePermission(conference, ConferencePermissions.READ_PERMISSION);
-      MessageManager mm = m_da.getMessageManager();
+      assertConferencePermission(conference, ConferencePermissions.READ_PERMISSION);
+      final MessageManager mm = m_da.getMessageManager();
       return mm.countAllMessagesLocally(conference);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
+  @Override
   public MessageSearchResult[] listCommentsGloballyToAuthor(
-      long user, Timestamp startDate, int offset, int length) throws UnexpectedException {
-    try {
-      return this.removeDuplicateMessages(
-          this.censorMessages(
-              m_da.getMessageManager()
-                  .listCommentsGloballyToAuthor(user, startDate, offset, length)));
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
-    } catch (ObjectNotFoundException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
-    }
-  }
-
-  public long countCommentsGloballyToAuthor(long user, Timestamp startDate)
+      final long user, final Timestamp startDate, final int offset, final int length)
       throws UnexpectedException {
     try {
-      MessageManager mm = m_da.getMessageManager();
-      return mm.countCommentsGloballyToAuthor(user, this.getLoggedInUserId(), startDate);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+      return removeDuplicateMessages(
+          censorMessages(
+              m_da.getMessageManager()
+                  .listCommentsGloballyToAuthor(user, startDate, offset, length)));
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
+    } catch (final ObjectNotFoundException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public NameAssociation[] findObjects(String pattern) throws UnexpectedException {
+  @Override
+  public long countCommentsGloballyToAuthor(final long user, final Timestamp startDate)
+      throws UnexpectedException {
     try {
-      return this.censorNames(m_da.getNameManager().findObjects(pattern));
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
-    } catch (ObjectNotFoundException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+      final MessageManager mm = m_da.getMessageManager();
+      return mm.countCommentsGloballyToAuthor(user, getLoggedInUserId(), startDate);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public void changeKeywords(long id, String keywords)
+  @Override
+  public NameAssociation[] findObjects(final String pattern) throws UnexpectedException {
+    try {
+      return censorNames(m_da.getNameManager().findObjects(pattern));
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
+    } catch (final ObjectNotFoundException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
+    }
+  }
+
+  @Override
+  public void changeKeywords(final long id, final String keywords)
       throws UnexpectedException, ObjectNotFoundException, AuthorizationException {
     try {
-      if (!this.canManipulateObject(id)) throw new AuthorizationException();
+      if (!canManipulateObject(id)) {
+        throw new AuthorizationException();
+      }
       m_da.getNameManager().changeKeywords(id, keywords);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public void changeEmailAlias(long id, String emailAlias)
+  @Override
+  public void changeEmailAlias(final long id, final String emailAlias)
       throws UnexpectedException, ObjectNotFoundException, AuthorizationException {
     try {
-      if (!this.canManipulateObject(id)) throw new AuthorizationException();
+      if (!canManipulateObject(id)) {
+        throw new AuthorizationException();
+      }
       m_da.getNameManager().changeEmailAlias(id, emailAlias);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public MessageLocator resolveLocator(MessageLocator message)
+  @Override
+  public MessageLocator resolveLocator(final MessageLocator message)
       throws ObjectNotFoundException, NoCurrentMessageException, UnexpectedException {
-    if (message == null)
-      return this.getMostRelevantOccurrence(
-          this.getCurrentConferenceId(), this.getCurrentMessage());
-    if (!message.isValid())
+    if (message == null) {
+      return getMostRelevantOccurrence(getCurrentConferenceId(), getCurrentMessage());
+    }
+    if (!message.isValid()) {
       throw new ObjectNotFoundException("Invalid message locator"); // Should not happen...
+    }
     if (message.getGlobalId() == -1) {
-      long conference =
-          message.getConference() != -1 ? message.getConference() : this.getCurrentConferenceId();
+      final long conference =
+          message.getConference() != -1 ? message.getConference() : getCurrentConferenceId();
       return new MessageLocator(
-          this.localToGlobal(conference, message.getLocalnum()), conference, message.getLocalnum());
+          localToGlobal(conference, message.getLocalnum()), conference, message.getLocalnum());
     } else if (message.getLocalnum() == -1) {
-      return this.getMostRelevantOccurrence(
-          message.getConference() == -1 ? this.getCurrentConferenceId() : message.getConference(),
+      return getMostRelevantOccurrence(
+          message.getConference() == -1 ? getCurrentConferenceId() : message.getConference(),
           message.getGlobalId());
-    } else return message;
+    } else {
+      return message;
+    }
   }
 
-  private MessageOccurrence toOccurrence(MessageLocator message)
+  private MessageOccurrence toOccurrence(final MessageLocator message)
       throws ObjectNotFoundException, UnexpectedException {
-    if (message instanceof MessageOccurrence) return (MessageOccurrence) message;
+    if (message instanceof MessageOccurrence) {
+      return (MessageOccurrence) message;
+    }
     try {
       return m_da.getMessageManager()
           .loadMessageOccurrence(message.getConference(), message.getLocalnum());
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
-  public void addBookmark(MessageLocator message, String annotation)
+  @Override
+  public void addBookmark(MessageLocator message, final String annotation)
       throws UnexpectedException, ObjectNotFoundException, NoCurrentMessageException {
     try {
-      message = this.resolveLocator(message);
-      m_da.getMessageManager()
-          .addBookmark(this.getLoggedInUserId(), message.getGlobalId(), annotation);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+      message = resolveLocator(message);
+      m_da.getMessageManager().addBookmark(getLoggedInUserId(), message.getGlobalId(), annotation);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
+  @Override
   public void deleteBookmark(MessageLocator message)
       throws UnexpectedException, ObjectNotFoundException, NoCurrentMessageException {
     try {
-      message = this.resolveLocator(message);
-      m_da.getMessageManager().deleteBookmark(this.getLoggedInUserId(), message.getGlobalId());
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+      message = resolveLocator(message);
+      m_da.getMessageManager().deleteBookmark(getLoggedInUserId(), message.getGlobalId());
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
+  @Override
   public Bookmark[] listBookmarks() throws UnexpectedException {
     try {
-      return m_da.getMessageManager().listBookmarks(this.getLoggedInUserId());
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+      return m_da.getMessageManager().listBookmarks(getLoggedInUserId());
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
+  @Override
   public MessageOccurrence postIncomingEmail(
-      String sender, String receiver, Date sent, Date received, String subject, String content)
+      final String sender,
+      final String receiver,
+      final Date sent,
+      final Date received,
+      final String subject,
+      final String content)
       throws EmailRecipientNotRecognizedException, EmailSenderNotRecognizedException,
           AuthorizationException, UnexpectedException {
     // Make sure we hold the apropriate privileges
     //
-    this.checkRights(UserPermissions.POST_ANYWHERE | UserPermissions.POST_BY_PROXY);
+    checkRights(UserPermissions.POST_ANYWHERE | UserPermissions.POST_BY_PROXY);
 
-    UserManager um = m_da.getUserManager();
-    NameManager nm = m_da.getNameManager();
-    MessageManager mm = m_da.getMessageManager();
+    final UserManager um = m_da.getUserManager();
+    final NameManager nm = m_da.getNameManager();
+    final MessageManager mm = m_da.getMessageManager();
     try {
       // Try to map sender and receiver email
       //
-      long senderId = um.matchEmailSender(sender);
-      long receiverId = nm.findByEmailAlias(receiver);
+      final long senderId = um.matchEmailSender(sender);
+      final long receiverId = nm.findByEmailAlias(receiver);
 
       // Are we sending to a person or a conference?
       //
-      MessageOccurrence occ;
-      UnstoredMessage msg = new UnstoredMessage(subject, content);
-      switch (this.getName(receiverId).getKind()) {
+      final MessageOccurrence occ;
+      final UnstoredMessage msg = new UnstoredMessage(subject, content);
+      switch (getName(receiverId).getKind()) {
         case NameManager.CONFERENCE_KIND:
           /// We need to check permissions if we're posting to a conference
           //
-          if (!this.hasPermissionInConference(
-              senderId, receiverId, ConferencePermissions.WRITE_PERMISSION))
+          if (!hasPermissionInConference(
+              senderId, receiverId, ConferencePermissions.WRITE_PERMISSION)) {
             throw new AuthorizationException();
-          occ = this.storeReplyAsMessage(senderId, receiverId, msg, -1);
+          }
+          occ = storeReplyAsMessage(senderId, receiverId, msg, -1);
           break;
         case NameManager.USER_KIND:
           // No need to check permissions here. Everyone can send mail
           //
-          occ = this.storeReplyAsMail(senderId, receiverId, msg, -1);
+          occ = storeReplyAsMail(senderId, receiverId, msg, -1);
           break;
         default:
           throw new IllegalStateException("Don't know how to handle message");
@@ -4085,70 +4272,196 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
 
       // Store sender email address, sent and received timestamps as message attributes
       //
-      long id = occ.getGlobalId();
+      final long id = occ.getGlobalId();
       mm.addMessageAttribute(id, MessageAttributes.EMAIL_SENDER, sender);
-      if (sent != null)
+      if (sent != null) {
         mm.addMessageAttribute(id, MessageAttributes.EMAIL_SENT, Long.toString(sent.getTime()));
-      if (received != null)
+      }
+      if (received != null) {
         mm.addMessageAttribute(
             id, MessageAttributes.EMAIL_RECEIVED, Long.toString(received.getTime()));
+      }
       return occ;
-    } catch (ObjectNotFoundException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
-    } catch (SQLException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final ObjectNotFoundException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
+    } catch (final SQLException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
+  @Override
   public SelectedMessages getSelectedMessages() {
     return m_selectedMessages;
   }
 
-  public boolean selectGrepMessagesLocally(long conference, String searchterm)
+  @Override
+  public boolean selectGrepMessagesLocally(final long conference, final String searchterm)
       throws UnexpectedException {
     m_selectedMessages.setMessages(
-        this.grepMessagesLocally(conference, searchterm, 0, MAX_SELECTION),
-        this.isSelectionReversed());
-    return m_selectedMessages.getMessages().length < MAX_SELECTION;
+        grepMessagesLocally(conference, searchterm, 0, ServerSessionImpl.MAX_SELECTION),
+        isSelectionReversed());
+    return m_selectedMessages.getMessages().length < ServerSessionImpl.MAX_SELECTION;
   }
 
-  public boolean selectMessagesGlobally(String searchterm) throws UnexpectedException {
+  @Override
+  public boolean selectMessagesGlobally(final String searchterm) throws UnexpectedException {
     m_selectedMessages.setMessages(
-        this.searchMessagesGlobally(searchterm, 0, MAX_SELECTION), this.isSelectionReversed());
-    return m_selectedMessages.getMessages().length < MAX_SELECTION;
+        searchMessagesGlobally(searchterm, 0, ServerSessionImpl.MAX_SELECTION),
+        isSelectionReversed());
+    return m_selectedMessages.getMessages().length < ServerSessionImpl.MAX_SELECTION;
   }
 
-  public boolean selectMessagesGloballyByAuthor(long user) throws UnexpectedException {
+  @Override
+  public boolean selectMessagesGloballyByAuthor(final long user) throws UnexpectedException {
     m_selectedMessages.setMessages(
-        this.listMessagesGloballyByAuthor(user, 0, MAX_SELECTION), this.isSelectionReversed());
-    return m_selectedMessages.getMessages().length < MAX_SELECTION;
+        listMessagesGloballyByAuthor(user, 0, ServerSessionImpl.MAX_SELECTION),
+        isSelectionReversed());
+    return m_selectedMessages.getMessages().length < ServerSessionImpl.MAX_SELECTION;
   }
 
-  public boolean selectMessagesLocally(long conference, String searchterm)
+  @Override
+  public boolean selectMessagesLocally(final long conference, final String searchterm)
       throws UnexpectedException {
     m_selectedMessages.setMessages(
-        this.searchMessagesLocally(conference, searchterm, 0, MAX_SELECTION),
-        this.isSelectionReversed());
-    return m_selectedMessages.getMessages().length < MAX_SELECTION;
+        searchMessagesLocally(conference, searchterm, 0, ServerSessionImpl.MAX_SELECTION),
+        isSelectionReversed());
+    return m_selectedMessages.getMessages().length < ServerSessionImpl.MAX_SELECTION;
   }
 
-  public boolean selectMessagesLocallyByAuthor(long conference, long user)
+  @Override
+  public boolean selectMessagesLocallyByAuthor(final long conference, final long user)
       throws UnexpectedException {
     m_selectedMessages.setMessages(
-        this.listMessagesLocallyByAuthor(conference, user, 0, MAX_SELECTION),
-        this.isSelectionReversed());
-    return m_selectedMessages.getMessages().length < MAX_SELECTION;
+        listMessagesLocallyByAuthor(conference, user, 0, ServerSessionImpl.MAX_SELECTION),
+        isSelectionReversed());
+    return m_selectedMessages.getMessages().length < ServerSessionImpl.MAX_SELECTION;
   }
 
-  public boolean selectCommentsGloballyToAuthor(long user, Timestamp startDate)
+  @Override
+  public boolean selectCommentsGloballyToAuthor(final long user, final Timestamp startDate)
       throws UnexpectedException {
     m_selectedMessages.setMessages(
-        this.listCommentsGloballyToAuthor(user, startDate, 0, MAX_SELECTION),
-        this.isSelectionReversed());
-    return m_selectedMessages.getMessages().length < MAX_SELECTION;
+        listCommentsGloballyToAuthor(user, startDate, 0, ServerSessionImpl.MAX_SELECTION),
+        isSelectionReversed());
+    return m_selectedMessages.getMessages().length < ServerSessionImpl.MAX_SELECTION;
   }
 
   private boolean isSelectionReversed() {
-    return (this.getLoggedInUser().getFlags1() & UserFlags.SELECT_YOUNGEST_FIRST) == 0;
+    return (getLoggedInUser().getFlags1() & UserFlags.SELECT_YOUNGEST_FIRST) == 0;
+  }
+
+  private static interface MessageOperation {
+    public void perform(long messageId) throws ObjectNotFoundException, UnexpectedException;
+  }
+
+  private abstract static class DeferredEvent {
+    protected final Event m_event;
+
+    public DeferredEvent(final Event event) {
+      m_event = event;
+    }
+
+    public abstract void dispatch(SessionManager manager);
+  }
+
+  private static class DeferredSend extends DeferredEvent {
+    private final long m_recipient;
+
+    public DeferredSend(final long recipient, final Event event) {
+      super(event);
+      m_recipient = recipient;
+    }
+
+    @Override
+    public void dispatch(final SessionManager manager) {
+      manager.sendEvent(m_recipient, m_event);
+    }
+  }
+
+  private static class DeferredBroadcast extends DeferredEvent {
+    public DeferredBroadcast(final Event event) {
+      super(event);
+    }
+
+    @Override
+    public void dispatch(final SessionManager manager) {
+      manager.broadcastEvent(m_event);
+    }
+  }
+
+  private class HeartbeatListenerImpl implements HeartbeatListener {
+    @Override
+    public void heartbeat() {
+      final ServerSessionImpl that = ServerSessionImpl.this;
+      final long now = System.currentTimeMillis();
+      if (now - that.m_lastHeartbeat > ServerSettings.getIdleNotificationThreashold()) {
+        final UserInfo ui = that.getLoggedInUserInEventHandler();
+        if (ui != null) {
+          that.m_sessions.broadcastEvent(
+              new UserAttendanceEvent(ui.getId(), ui.getName(), UserAttendanceEvent.AWOKE));
+        }
+      }
+      that.m_lastHeartbeat = System.currentTimeMillis();
+    }
+  }
+
+  private class MarkAsUnreadOperation implements MessageOperation {
+    @Override
+    public void perform(final long messageId) throws ObjectNotFoundException, UnexpectedException {
+      innerMarkAsUnreadAtLogout(messageId);
+    }
+  }
+
+  private class MarkAsReadOperation implements MessageOperation {
+    @Override
+    public void perform(final long messageId) throws ObjectNotFoundException, UnexpectedException {
+      final ServerSessionImpl that = ServerSessionImpl.this;
+      try {
+        final MessageManager mm = that.m_da.getMessageManager();
+        final MessageOccurrence[] mos =
+            mm.getVisibleOccurrences(that.getLoggedInUserId(), messageId);
+        for (int idx = 0; idx < mos.length; ++idx) {
+          final MessageOccurrence mo = mos[idx];
+          that.markMessageAsReadEx(mo.getConference(), mo.getLocalnum());
+        }
+      } catch (final SQLException e) {
+        throw new UnexpectedException(that.getLoggedInUserId(), e);
+      }
+    }
+  }
+
+  private class SortableMembershipInfo implements Comparable<SortableMembershipInfo> {
+    private final MembershipInfo m_mi;
+    private final long m_parentCount;
+
+    public SortableMembershipInfo(final MembershipInfo mi, final long parentCount) {
+      m_mi = mi;
+      m_parentCount = parentCount;
+    }
+
+    public MembershipInfo getMembershipInfo() {
+      return m_mi;
+    }
+
+    protected long getId() {
+      return m_mi.getConference();
+    }
+
+    protected long getPriority() {
+      return m_mi.getPriority();
+    }
+
+    protected long getParentCount() {
+      return m_parentCount;
+    }
+
+    @Override
+    public int compareTo(final SortableMembershipInfo that) {
+      return getParentCount() < that.getParentCount()
+          ? -1
+          : (getParentCount() > that.getParentCount()
+              ? 1
+              : (getPriority() < that.getPriority() ? -1 : 1));
+    }
   }
 }
