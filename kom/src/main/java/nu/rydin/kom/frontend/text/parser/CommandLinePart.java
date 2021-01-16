@@ -15,6 +15,17 @@ import nu.rydin.kom.frontend.text.Context;
 
 /** @author Magnus Ihse Bursie (magnus@ihse.net) */
 public abstract class CommandLinePart {
+  public static String cookString(final String matchingPart) {
+    final String name = NameUtils.normalizeName(matchingPart);
+    final int top = name.length();
+    if (top == 0) {
+      return "";
+    }
+    return top > 1 && name.charAt(0) == '\'' && name.charAt(top - 1) == '\''
+        ? name.substring(1, top - 1)
+        : name;
+  }
+
   public abstract boolean isRequired();
 
   public abstract char getSeparator();
@@ -28,9 +39,9 @@ public abstract class CommandLinePart {
    * @return
    */
   public Match match(String commandLine) {
-    String matchingPart;
-    String remainder;
-    Match result = null;
+    final String matchingPart;
+    final String remainder;
+    final Match result;
 
     // Trim leading whitespace
     while (commandLine.length() > 0 && Character.isWhitespace(commandLine.charAt(0))) {
@@ -40,14 +51,14 @@ public abstract class CommandLinePart {
     if (commandLine.length() == 0) {
       result = new Match(false, null, null, null);
     } else {
-      int separatorPos = getSeparatorPos(commandLine);
+      final int separatorPos = getSeparatorPos(commandLine);
 
       if (separatorPos == -1) {
         matchingPart = commandLine;
         remainder = "";
       } else {
         matchingPart = commandLine.substring(0, separatorPos);
-        remainder = commandLine.substring(separatorPos + 1, commandLine.length());
+        remainder = commandLine.substring(separatorPos + 1);
       }
       result = innerMatch(matchingPart, remainder);
     }
@@ -61,14 +72,17 @@ public abstract class CommandLinePart {
     }
   }
 
-  protected int getSeparatorPos(String commandLine) {
-    int top = commandLine.length();
+  protected int getSeparatorPos(final String commandLine) {
+    final int top = commandLine.length();
     boolean quoted = false;
-    char separator = this.getSeparator();
+    final char separator = getSeparator();
     for (int idx = 0; idx < top; ++idx) {
-      char each = commandLine.charAt(idx);
-      if (each == '\'') quoted = !quoted;
-      else if (each == separator && !quoted) return idx;
+      final char each = commandLine.charAt(idx);
+      if (each == '\'') {
+        quoted = !quoted;
+      } else if (each == separator && !quoted) {
+        return idx;
+      }
     }
     return -1;
   }
@@ -77,17 +91,8 @@ public abstract class CommandLinePart {
       throws IOException, InterruptedException, OperationInterruptedException,
           InvalidChoiceException;
 
-  public Object resolveFoundObject(Context context, Match match)
+  public Object resolveFoundObject(final Context context, final Match match)
       throws IOException, InterruptedException, KOMException {
     return match.getParsedObject();
-  }
-
-  public static String cookString(String matchingPart) {
-    String name = NameUtils.normalizeName(matchingPart);
-    int top = name.length();
-    if (top == 0) return "";
-    return top > 1 && name.charAt(0) == '\'' && name.charAt(top - 1) == '\''
-        ? name.substring(1, top - 1)
-        : name;
   }
 }

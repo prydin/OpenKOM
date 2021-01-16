@@ -10,16 +10,16 @@ import java.util.TimeZone;
 
 /** @author Magnus Ihse Bursie */
 public class TimeZoneParameter extends EnumParameter {
-  private static String[] m_javaTimeZones;
+  private static final String[] m_javaTimeZones;
 
-  private static String[] m_presentableTimeZones;
+  private static final String[] m_presentableTimeZones;
 
   static {
     m_javaTimeZones = TimeZone.getAvailableIDs();
     m_presentableTimeZones = convertToPresentable(m_javaTimeZones);
   }
 
-  public TimeZoneParameter(String missingObjectQuestionKey, boolean isRequired) {
+  public TimeZoneParameter(final String missingObjectQuestionKey, final boolean isRequired) {
     super(
         missingObjectQuestionKey,
         "parser.parameter.timezone.header",
@@ -30,29 +30,30 @@ public class TimeZoneParameter extends EnumParameter {
         isRequired);
   }
 
+  public TimeZoneParameter(final boolean isRequired) {
+    this("parser.parameter.timezone.ask", isRequired);
+  }
+
   /**
    * @param timeZones
    * @return
    */
-  private static String[] convertToPresentable(String[] timeZones) {
-    String[] converted = new String[timeZones.length];
+  private static String[] convertToPresentable(final String[] timeZones) {
+    final String[] converted = new String[timeZones.length];
 
     for (int i = 0; i < timeZones.length; i++) {
-      String original = timeZones[i];
+      final String original = timeZones[i];
       converted[i] = original.replace('/', ' ').replace('_', ' ');
     }
 
     return converted;
   }
 
-  public static String getJavaNameForTimeZoneSelection(Integer selection) {
-    return m_javaTimeZones[selection.intValue()];
+  public static String getJavaNameForTimeZoneSelection(final Integer selection) {
+    return m_javaTimeZones[selection];
   }
 
-  public TimeZoneParameter(boolean isRequired) {
-    this("parser.parameter.timezone.ask", isRequired);
-  }
-
+  @Override
   protected String getUserDescriptionKey() {
     return "parser.parameter.timezone.description";
   }

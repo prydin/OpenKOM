@@ -61,18 +61,11 @@ public class DataAccessPool {
   private DataAccess createDataAccess() throws UnexpectedException {
     final Connection conn;
     try {
-      Class.forName(ServerSettings.getJDBCDriverClass()).newInstance();
       conn = DriverManager.getConnection(ServerSettings.getJDBCConnectString());
       conn.setAutoCommit(false);
       //			Statement stmt = conn.createStatement();
       //			stmt.execute("SET AUTOCOMMIT=0");
       return new DataAccess(conn);
-    } catch (final IllegalAccessException e) {
-      throw new UnexpectedException(-1, "PANIC: Can't access driver", e);
-    } catch (final ClassNotFoundException e) {
-      throw new UnexpectedException(-1, "PANIC: Can't find driver", e);
-    } catch (final InstantiationException e) {
-      throw new UnexpectedException(-1, "PANIC: Can't instantiate driver", e);
     } catch (final SQLException e) {
       throw new UnexpectedException(-1, "PANIC: Error while creating connection", e);
     }

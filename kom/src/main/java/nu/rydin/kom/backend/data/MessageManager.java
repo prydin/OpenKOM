@@ -693,7 +693,7 @@ public class MessageManager {
     // Get hold of id of newly created record
     //
     final long id;
-    try (final ResultSet rs = m_addBookmarkStmt.getResultSet()) {
+    try (final ResultSet rs = m_addMessageStmt.getGeneratedKeys()) {
       if (!rs.next()) {
         throw new UnexpectedException(-1, "No message ID generated");
       }
@@ -1127,7 +1127,7 @@ public class MessageManager {
       m_countMessageOccurrencesStmt.clearParameters();
       m_countMessageOccurrencesStmt.setLong(1, globalId);
       rs = m_countMessageOccurrencesStmt.executeQuery();
-      rs.first();
+      rs.next();
       return rs.getInt(1);
     } finally {
       if (rs != null) {
@@ -1225,7 +1225,7 @@ public class MessageManager {
     m_findLastOccurrenceInConferenceWithAttrStmt.setShort(1, attrKind);
     m_findLastOccurrenceInConferenceWithAttrStmt.setLong(2, conference);
     try (final ResultSet rs = m_findLastOccurrenceInConferenceWithAttrStmt.executeQuery()) {
-      rs.first();
+      rs.next();
       return rs.getInt(1);
     }
   }
@@ -1435,7 +1435,7 @@ public class MessageManager {
 
   public long countMessages() throws SQLException {
     try (final ResultSet rs = m_countStmt.executeQuery()) {
-      rs.first();
+      rs.next();
       return rs.getLong(1);
     }
   }
@@ -1531,7 +1531,7 @@ public class MessageManager {
     m_getThreadIdForMessageStmt.setLong(1, msgid);
 
     try (final ResultSet rs = m_getThreadIdForMessageStmt.executeQuery()) {
-      rs.first();
+      rs.next();
       return rs.getLong(1);
     }
   }

@@ -88,7 +88,7 @@ public class MessageLogManager {
     m_storeMessageStmt.setLong(3, author);
     m_storeMessageStmt.setString(4, authorName);
     m_storeMessageStmt.executeUpdate();
-    try (final ResultSet rs = m_storeMessageStmt.getResultSet()) {
+    try (final ResultSet rs = m_storeMessageStmt.getGeneratedKeys()) {
       if (!rs.next()) {
         throw new UnexpectedException(-1, "Unable to get message log id");
       }

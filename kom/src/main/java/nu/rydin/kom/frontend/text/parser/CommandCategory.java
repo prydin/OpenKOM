@@ -12,15 +12,15 @@ import nu.rydin.kom.frontend.text.Command;
 
 /** @author Pontus Rydin */
 public class CommandCategory implements Comparable<CommandCategory> {
-  private String id;
+  private final String id;
 
-  private String i18nKey;
+  private final String i18nKey;
 
-  private int order;
+  private final int order;
 
-  private LinkedList<Command> commands = new LinkedList<Command>();
+  private final LinkedList<Command> commands = new LinkedList<>();
 
-  public CommandCategory(String id, String key, int order) {
+  public CommandCategory(final String id, final String key, final int order) {
     super();
     this.id = id;
     i18nKey = key;
@@ -43,11 +43,12 @@ public class CommandCategory implements Comparable<CommandCategory> {
     return commands;
   }
 
-  public void addCommand(Command command) {
+  public void addCommand(final Command command) {
     commands.add(command);
   }
 
-  public int compareTo(CommandCategory cat) {
-    return cat.order == this.order ? 0 : (this.order > cat.order ? 1 : -1);
+  @Override
+  public int compareTo(final CommandCategory cat) {
+    return Integer.compare(order, cat.order);
   }
 }

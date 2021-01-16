@@ -11,5 +11,5 @@ import nu.rydin.kom.frontend.text.Context;
 
 /** @author Pontus Rydin */
 public interface DefaultStrategy {
-  public String getDefault(Context context) throws UnexpectedException;
+  String getDefault(Context context) throws UnexpectedException;
 }

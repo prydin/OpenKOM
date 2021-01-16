@@ -510,9 +510,11 @@ public class UserManager {
     }
   }
 
-  public long countUsers() throws SQLException {
+  public long countUsers() throws SQLException, UnexpectedException {
     try (final ResultSet rs = m_countStmt.executeQuery()) {
-      rs.first();
+      if (!rs.next()) {
+        throw new UnexpectedException(-1, "Empty rowset");
+      }
       return rs.getLong(1);
     }
   }

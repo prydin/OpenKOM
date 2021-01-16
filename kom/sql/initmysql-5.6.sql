@@ -1,12 +1,12 @@
-CREATE DATABASE IF NOT EXISTS kom;
+create DATABASE IF NOT EXISTS kom;
 
-GRANT SELECT, INSERT, DELETE, UPDATE, CREATE, ALTER, INDEX, DROP ON kom.* TO 'kom' IDENTIFIED BY 'kom';
+grant select, insert, delete, update, create, alter, index, drop ON kom.* TO 'kom' IDENTIFIED BY 'kom';
 
 FLUSH PRIVILEGES;
 
 USE kom;
 
-CREATE TABLE IF NOT EXISTS names
+create TABLE IF NOT EXISTS names
 (
 	id BIGINT NOT NULL AUTO_INCREMENT,
 	norm_name VARCHAR(80) NOT NULL DEFAULT '',
@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS names
 	UNIQUE INDEX norm_name_ix(norm_name)
 ) ENGINE=INNODB;
 
-CREATE TABLE IF NOT EXISTS users 
+create TABLE IF NOT EXISTS users
 (
 	id BIGINT NOT NULL DEFAULT 0,
 	userid VARCHAR(50),
@@ -44,11 +44,11 @@ CREATE TABLE IF NOT EXISTS users
 	created DATETIME NOT NULL DEFAULT NOW(),
 	lastlogin DATETIME NOT NULL DEFAULT NOW(),
 	PRIMARY KEY(id),
-	FOREIGN KEY (id) REFERENCES names(id) ON DELETE CASCADE,
+	FOREIGN KEY (id) REFERENCES names(id) ON delete CASCADE,
 	INDEX userid_ix(userid)
 ) ENGINE=INNODB;
 
-CREATE TABLE IF NOT EXISTS conferences 
+create TABLE IF NOT EXISTS conferences
 (
 	id BIGINT NOT NULL DEFAULT 0,
 	administrator BIGINT NOT NULL DEFAULT 0,
@@ -58,15 +58,15 @@ CREATE TABLE IF NOT EXISTS conferences
 	created DATETIME NOT NULL DEFAULT NOW(),
 	lasttext DATETIME NOT NULL DEFAULT NOW(),
 	PRIMARY KEY(id),	
-	FOREIGN KEY (id) REFERENCES names(id) ON DELETE CASCADE,
+	FOREIGN KEY (id) REFERENCES names(id) ON delete CASCADE,
 	INDEX admin_ix(administrator),
-	FOREIGN KEY (administrator) REFERENCES users(id) ON DELETE RESTRICT,
+	FOREIGN KEY (administrator) REFERENCES users(id) ON delete RESTRICT,
 	INDEX replyConf_ix(replyConf),
-	FOREIGN KEY (replyConf) REFERENCES conferences(id) ON DELETE SET NULL,
+	FOREIGN KEY (replyConf) REFERENCES conferences(id) ON delete SET NULL,
     INDEX lasttext_ix(lasttext)
 ) ENGINE=INNODB;
 
-CREATE TABLE IF NOT EXISTS memberships
+create TABLE IF NOT EXISTS memberships
 (
 	conference BIGINT NOT NULL DEFAULT 0,
 	user BIGINT NOT NULL DEFAULT 0,
@@ -78,12 +78,12 @@ CREATE TABLE IF NOT EXISTS memberships
 	markers TEXT,
 	PRIMARY KEY(conference, user),
 	INDEX mbrconf_ix(conference),
-	FOREIGN KEY (conference) REFERENCES conferences(id) ON DELETE CASCADE,
+	FOREIGN KEY (conference) REFERENCES conferences(id) ON delete CASCADE,
 	INDEX mbruser_ix(user),
-	FOREIGN KEY (user) REFERENCES users(id) ON DELETE CASCADE		
+	FOREIGN KEY (user) REFERENCES users(id) ON delete CASCADE
 ) ENGINE=INNODB;
 
-CREATE TABLE IF NOT EXISTS messages
+create TABLE IF NOT EXISTS messages
 (
 	id BIGINT NOT NULL AUTO_INCREMENT,
 	created DATETIME NOT NULL DEFAULT NOW(),
@@ -96,14 +96,14 @@ CREATE TABLE IF NOT EXISTS messages
 	body LONGTEXT NOT NULL,
 	PRIMARY KEY(id),
 	INDEX msgauthor_ix(author),
-	FOREIGN KEY (author) REFERENCES users(id) ON DELETE SET NULL,
+	FOREIGN KEY (author) REFERENCES users(id) ON delete SET NULL,
 	INDEX msgreply_ix(reply_to),
-	FOREIGN KEY (reply_to) REFERENCES messages(id) ON DELETE SET NULL,
+	FOREIGN KEY (reply_to) REFERENCES messages(id) ON delete SET NULL,
 	INDEX thread_ix(thread),
 	INDEX msg_author_created(author, created)
 ) ENGINE=INNODB;
 
-CREATE TABLE IF NOT EXISTS messagesearch 
+create TABLE IF NOT EXISTS messagesearch
 (
 	id BIGINT(20) NOT NULL DEFAULT 0,
 	subject VARCHAR(80) NOT NULL DEFAULT '',
@@ -112,7 +112,7 @@ CREATE TABLE IF NOT EXISTS messagesearch
 	FULLTEXT KEY search_ix (subject,body)
 ) ENGINE=MyISAM; 
 
-CREATE TABLE IF NOT EXISTS messageoccurrences
+create TABLE IF NOT EXISTS messageoccurrences
 (
 	localnum INT NOT NULL DEFAULT 0,
 	conference BIGINT NOT NULL DEFAULT 0,
@@ -123,14 +123,14 @@ CREATE TABLE IF NOT EXISTS messageoccurrences
 	user_name VARCHAR(80),
 	PRIMARY KEY(conference, localnum),
 	INDEX occconf_ix(conference),
-	FOREIGN KEY (conference) REFERENCES conferences(id) ON DELETE CASCADE,
+	FOREIGN KEY (conference) REFERENCES conferences(id) ON delete CASCADE,
 	INDEX occuser_ix(user),
-	FOREIGN KEY (user) REFERENCES users(id) ON DELETE SET NULL,
+	FOREIGN KEY (user) REFERENCES users(id) ON delete SET NULL,
 	INDEX occmessage_ix(message),
-	FOREIGN KEY (message) REFERENCES messages(id) ON DELETE CASCADE
+	FOREIGN KEY (message) REFERENCES messages(id) ON delete CASCADE
 ) ENGINE=INNODB;
 
-CREATE TABLE IF NOT EXISTS messageattributes
+create TABLE IF NOT EXISTS messageattributes
 (
 	id BIGINT NOT NULL AUTO_INCREMENT,
 	message BIGINT NOT NULL DEFAULT 0,
@@ -139,32 +139,32 @@ CREATE TABLE IF NOT EXISTS messageattributes
 	value TEXT,
 	PRIMARY KEY (id),
 	INDEX message_ix(message),
-	FOREIGN KEY (message) REFERENCES messages(id) ON DELETE CASCADE,
+	FOREIGN KEY (message) REFERENCES messages(id) ON delete CASCADE,
 	INDEX messagekind_ix(message, kind)
 ) ENGINE=INNODB;
 
-CREATE TABLE IF NOT EXISTS bookmarks
+create TABLE IF NOT EXISTS bookmarks
 (
 	user BIGINT NOT NULL DEFAULT 0,
 	message BIGINT NOT NULL DEFAULT 0,
 	created DATETIME NOT NULL DEFAULT NOW(),
 	annotation VARCHAR(100),
 	PRIMARY KEY(user, message),
-	FOREIGN KEY(message) REFERENCES messages(id) ON DELETE CASCADE,
+	FOREIGN KEY(message) REFERENCES messages(id) ON delete CASCADE,
 	INDEX(user, created)
 ) ENGINE=INNODB;
 
-CREATE TABLE IF NOT EXISTS magicconferences
+create TABLE IF NOT EXISTS magicconferences
 (
 	user BIGINT NOT NULL DEFAULT 0,
-	conference BIGINT NULL DEFAULT 0,
+	conference BIGINT NOT NULL DEFAULT 0,
 	kind SMALLINT NOT NULL DEFAULT 0,
 	PRIMARY KEY(conference, kind),
-	FOREIGN KEY(conference) REFERENCES conferences(id) ON DELETE CASCADE,
-	FOREIGN KEY(user) REFERENCES users(id) ON DELETE CASCADE
+	FOREIGN KEY(conference) REFERENCES conferences(id) ON delete CASCADE,
+	FOREIGN KEY(user) REFERENCES users(id) ON delete CASCADE
 ) ENGINE=INNODB;
 
-CREATE TABLE IF NOT EXISTS messagelog
+create TABLE IF NOT EXISTS messagelog
 (
 	id BIGINT NOT NULL AUTO_INCREMENT,
 	body TEXT NOT NULL,
@@ -173,22 +173,22 @@ CREATE TABLE IF NOT EXISTS messagelog
 	author_name VARCHAR(80) NOT NULL DEFAULT '',
 	PRIMARY KEY(id),
 	INDEX mlauthor(author),
-	FOREIGN KEY (author) REFERENCES users(id) ON DELETE SET NULL
+	FOREIGN KEY (author) REFERENCES users(id) ON delete SET NULL
 ) ENGINE=INNODB;
 
-CREATE TABLE IF NOT EXISTS messagelogpointers
+create TABLE IF NOT EXISTS messagelogpointers
 (
 	recipient BIGINT NOT NULL DEFAULT 0,
 	logid BIGINT NOT NULL DEFAULT 0,
 	kind SMALLINT NOT NULL DEFAULT 0,
 	sent BOOL NOT NULL DEFAULT 0,
 	INDEX mlpuser_ix(recipient),
-	FOREIGN KEY (recipient) REFERENCES names(id) ON DELETE CASCADE,
+	FOREIGN KEY (recipient) REFERENCES names(id) ON delete CASCADE,
 	INDEX logitem(logid),
-	FOREIGN KEY (logid) REFERENCES messagelog(id) ON DELETE CASCADE
+	FOREIGN KEY (logid) REFERENCES messagelog(id) ON delete CASCADE
 ) ENGINE=INNODB;
 
-CREATE TABLE IF NOT EXISTS userlog
+create TABLE IF NOT EXISTS userlog
 (
 	user BIGINT NOT NULL DEFAULT 0,
 	logged_in DATETIME NOT NULL DEFAULT NOW(),
@@ -199,11 +199,11 @@ CREATE TABLE IF NOT EXISTS userlog
 	num_broadcasts INT NOT NULL DEFAULT 0,
 	num_copies INT NOT NULL DEFAULT 0,
 	INDEX userlog_user(user),
-	FOREIGN KEY (user) REFERENCES users(id) ON DELETE CASCADE,
+	FOREIGN KEY (user) REFERENCES users(id) ON delete CASCADE,
 	INDEX userlog_date(logged_in)
 ) ENGINE=INNODB;
 
-CREATE TABLE IF NOT EXISTS files
+create TABLE IF NOT EXISTS files
 (
 	parent BIGINT NOT NULL DEFAULT 0,
 	name VARCHAR(100) NOT NULL DEFAULT '',
@@ -213,10 +213,10 @@ CREATE TABLE IF NOT EXISTS files
 	protection INT NOT NULL DEFAULT 0,
 	PRIMARY KEY(parent, name),
 	INDEX file_parentix(parent), 
-	FOREIGN KEY (parent) REFERENCES names(id) ON DELETE CASCADE
+	FOREIGN KEY (parent) REFERENCES names(id) ON delete CASCADE
 ) ENGINE=INNODB;
 
-CREATE TABLE IF NOT EXISTS settings
+create TABLE IF NOT EXISTS settings
 (
 	name VARCHAR(100) NOT NULL DEFAULT '',
 	string_value VARCHAR(100),
@@ -224,7 +224,7 @@ CREATE TABLE IF NOT EXISTS settings
 	PRIMARY KEY(name)
 ) ENGINE=INNODB;
 
-CREATE TABLE IF NOT EXISTS relationships
+create TABLE IF NOT EXISTS relationships
 (
 	id BIGINT NOT NULL AUTO_INCREMENT,
 	referer BIGINT NOT NULL DEFAULT 0,
@@ -233,27 +233,27 @@ CREATE TABLE IF NOT EXISTS relationships
 	flags BIGINT NOT NULL DEFAULT 0,
 	PRIMARY KEY(id),
 	INDEX referer_ix(referer),
-	FOREIGN KEY (referer) REFERENCES names(id) ON DELETE CASCADE,
+	FOREIGN KEY (referer) REFERENCES names(id) ON delete CASCADE,
 	INDEX referee_ix(referee),
-	FOREIGN KEY (referee) REFERENCES names(id) ON DELETE CASCADE
+	FOREIGN KEY (referee) REFERENCES names(id) ON delete CASCADE
 ) ENGINE=INNODB;
 
 -- Create sysop
 --
-INSERT INTO names
+insert into names
 	(id, norm_name, fullname, kind, visibility) 
-VALUES 
+values
 	(1, 'SYSOP', 'Sysop', 0, 0);
 
-INSERT INTO users
+insert into users
 	(id, userid, pwddigest, flags1, rights, locale, charset, created)
-VALUES
+values
 	(1, 'sysop', '$1$7jv0PRm9$sBErMtzDqq33l2WByDWEc1', 124239, -1, 'sv_SE', 'ISO-8859-1', NOW());
-INSERT INTO conferences
+insert into conferences
 	(id, administrator, replyConf, permissions, nonmember_permissions, created)
-VALUES
+values
 	(1, 1, null, 0, 0, NOW());
-INSERT INTO memberships
+insert into memberships
 	(conference, user, priority, flags, active, permissions, negation_mask, markers)
-VALUES
+values
 	(1, 1, 1, 0, 1, 32727, 0, null);

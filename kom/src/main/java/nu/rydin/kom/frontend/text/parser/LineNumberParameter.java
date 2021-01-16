@@ -15,23 +15,25 @@ import nu.rydin.kom.frontend.text.editor.EditorContext;
 /** @author Magnus Ihse Bursie */
 public class LineNumberParameter extends IntegerParameter {
 
-  public LineNumberParameter(String missingObjectQuestionKey, boolean isRequired) {
+  public LineNumberParameter(final String missingObjectQuestionKey, final boolean isRequired) {
     super(missingObjectQuestionKey, isRequired);
   }
 
-  public LineNumberParameter(boolean isRequired) {
+  public LineNumberParameter(final boolean isRequired) {
     super("parser.parameter.linenumber.ask", isRequired);
   }
 
-  public Object resolveFoundObject(Context context, Match match) throws KOMException {
-    int line = ((Integer) (match.getParsedObject())).intValue();
-    Buffer buffer = ((EditorContext) context).getBuffer();
+  @Override
+  public Object resolveFoundObject(final Context context, final Match match) throws KOMException {
+    final int line = (Integer) (match.getParsedObject());
+    final Buffer buffer = ((EditorContext) context).getBuffer();
     if (line < 1 || line > buffer.size()) {
       throw new InvalidLineNumberException();
     }
     return match.getParsedObject();
   }
 
+  @Override
   protected String getUserDescriptionKey() {
     return "parser.parameter.linenumber.description";
   }

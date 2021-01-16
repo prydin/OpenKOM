@@ -357,11 +357,12 @@ public class NameManager {
 
     // Now, read it back to obtain the id
     //
-    final ResultSet rs = m_addNameStmt.getResultSet();
-    if (!rs.next()) {
-      throw new UnexpectedException(-1, "No key returned from insert");
+    try (final ResultSet rs = m_addNameStmt.getGeneratedKeys()) {
+      if (!rs.next()) {
+        throw new UnexpectedException(-1, "No key returned from insert");
+      }
+      return rs.getLong(1);
     }
-    return rs.getLong(1);
   }
 
   /**

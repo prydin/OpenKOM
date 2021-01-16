@@ -7,6 +7,7 @@
 package nu.rydin.kom.frontend.text.parser;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
 import nu.rydin.kom.backend.NameUtils;
@@ -26,15 +27,16 @@ public class ChatRececipientParameter extends NamedObjectParameter {
   public static final NameAssociation ALL_USERS =
       new NameAssociation(-1, "alla", NameManager.UNKNOWN_KIND);
 
-  public ChatRececipientParameter(String missingObjectQuestionKey, boolean isRequired) {
+  public ChatRececipientParameter(final String missingObjectQuestionKey, final boolean isRequired) {
     super(missingObjectQuestionKey, isRequired);
   }
 
-  public ChatRececipientParameter(boolean isRequired) {
+  public ChatRececipientParameter(final boolean isRequired) {
     super(isRequired);
   }
 
-  public Object resolveFoundObject(Context context, Match match)
+  @Override
+  public Object resolveFoundObject(final Context context, final Match match)
       throws KOMException, IOException, InterruptedException {
     // First, get the list of logged in users and extract the names
     //
@@ -44,29 +46,27 @@ public class ChatRececipientParameter extends NamedObjectParameter {
       return ALL_USERS;
     }
 
-    ServerSession session = context.getSession();
+    final ServerSession session = context.getSession();
 
     // Use a set since we want each name only once, even if the
     // user is logged in multiple times
     //
-    Set<NameAssociation> set = new HashSet<NameAssociation>();
+    final Set<NameAssociation> set = new HashSet<>();
     if (pattern.startsWith("*")) {
       // Argument was prefixed by "*". That means, we want to select
       // recipient from the list of conferences.
       pattern = pattern.substring(1); // Remove "*".
 
-      NameAssociation[] conferences =
+      final NameAssociation[] conferences =
           session.getAssociationsForPatternAndKind(pattern, NameManager.CONFERENCE_KIND);
-      for (int idx = 0; idx < conferences.length; ++idx) {
-        set.add(conferences[idx]);
-      }
+      Collections.addAll(set, conferences);
     } else {
       // Otherwise, we select it from the list of logged in users.
 
-      long numId = this.getNamedObjectIdIfPresent(pattern);
-      UserListItem[] users = session.listLoggedInUsers();
-      for (int idx = 0; idx < users.length; ++idx) {
-        NameAssociation name = users[idx].getUser();
+      final long numId = getNamedObjectIdIfPresent(pattern);
+      final UserListItem[] users = session.listLoggedInUsers();
+      for (final UserListItem user : users) {
+        final NameAssociation name = user.getUser();
 
         // First, see if we were passed a numeric ID instead of a name; if so, we
         // won't have to call NameUtils.match().
@@ -95,7 +95,7 @@ public class ChatRececipientParameter extends NamedObjectParameter {
             pattern = pattern.substring(1); // Remove "*".
             throw new ObjectNotFoundException(pattern);
           } else {
-            NameAssociation[] names =
+            final NameAssociation[] names =
                 session.getAssociationsForPatternAndKind(pattern, NameManager.USER_KIND);
             if (names.length == 0) {
               throw new ObjectNotFoundException(pattern);
@@ -108,24 +108,25 @@ public class ChatRececipientParameter extends NamedObjectParameter {
           //
         }
       case 1:
-        return ((NameAssociation) set.iterator().next());
+        return set.iterator().next();
       default:
         {
-          NameAssociation[] names = new NameAssociation[set.size()];
+          final NameAssociation[] names = new NameAssociation[set.size()];
           set.toArray(names);
           return NamePicker.pickName(names, context);
         }
     }
   }
 
-  protected boolean isValidName(String name) {
+  @Override
+  protected boolean isValidName(final String name) {
     return (super.isValidName(name)
         || name.equals("*")
         || (name.startsWith("*") && super.isValidName(name.substring(1))));
   }
 
   @SuppressWarnings("finally")
-  private long getNamedObjectIdIfPresent(String pattern) {
+  private long getNamedObjectIdIfPresent(final String pattern) {
     long l = -1;
     try {
       l = Long.parseLong(pattern);

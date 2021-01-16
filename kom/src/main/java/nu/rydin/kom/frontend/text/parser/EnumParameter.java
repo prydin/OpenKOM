@@ -28,16 +28,16 @@ public abstract class EnumParameter extends CommandLineParameter {
 
   private final String m_legendKeyPrefix;
 
-  private boolean m_allowPrefixes;
+  private final boolean m_allowPrefixes;
 
   public EnumParameter(
-      String missingObjectQuestionKey,
-      String headingKey,
-      String promptKey,
-      String[] alternatives,
-      boolean allowPrefixes,
-      String legendKeyPrefix,
-      boolean isRequired) {
+      final String missingObjectQuestionKey,
+      final String headingKey,
+      final String promptKey,
+      final String[] alternatives,
+      final boolean allowPrefixes,
+      final String legendKeyPrefix,
+      final boolean isRequired) {
     this(
         missingObjectQuestionKey,
         headingKey,
@@ -50,28 +50,30 @@ public abstract class EnumParameter extends CommandLineParameter {
   }
 
   public EnumParameter(
-      String missingObjectQuestionKey,
-      String headingKey,
-      String promptKey,
-      String[] alternatives,
-      boolean allowPrefixes,
-      String legendKeyPrefix,
-      boolean isRequired,
-      DefaultStrategy def) {
+      final String missingObjectQuestionKey,
+      final String headingKey,
+      final String promptKey,
+      final String[] alternatives,
+      final boolean allowPrefixes,
+      final String legendKeyPrefix,
+      final boolean isRequired,
+      final DefaultStrategy def) {
     super(missingObjectQuestionKey, isRequired, def);
     m_headingKey = headingKey;
     m_promptKey = promptKey;
     m_legendKeyPrefix = legendKeyPrefix;
     m_allowPrefixes = allowPrefixes;
-    m_alternatives = new ArrayList<String>(alternatives.length);
-    for (int i = 0; i < alternatives.length; i++) {
-      String each = alternatives[i];
-      if (each != null) m_alternatives.add(each);
+    m_alternatives = new ArrayList<>(alternatives.length);
+    for (final String each : alternatives) {
+      if (each != null) {
+        m_alternatives.add(each);
+      }
     }
   }
 
-  protected Match innerMatch(String matchingPart, String remainder) {
-    String cooked = cookString(matchingPart);
+  @Override
+  protected Match innerMatch(final String matchingPart, final String remainder) {
+    final String cooked = cookString(matchingPart);
 
     if (cooked.length() > 0) {
       // well, this _could_ be a flag... check it later
@@ -81,26 +83,26 @@ public abstract class EnumParameter extends CommandLineParameter {
     }
   }
 
-  public Object resolveFoundObject(Context context, Match match)
+  @Override
+  public Object resolveFoundObject(final Context context, final Match match)
       throws IOException, InterruptedException, KOMException {
-    int selected =
-        Parser.resolveString(
-            context,
-            match.getMatchedString(),
-            m_alternatives,
-            m_headingKey,
-            m_promptKey,
-            m_allowPrefixes,
-            m_legendKeyPrefix);
-    return new Integer(selected);
+    return Parser.resolveString(
+        context,
+        match.getMatchedString(),
+        m_alternatives,
+        m_headingKey,
+        m_promptKey,
+        m_allowPrefixes,
+        m_legendKeyPrefix);
   }
 
-  public Match fillInMissingObject(Context context)
+  @Override
+  public Match fillInMissingObject(final Context context)
       throws InvalidChoiceException, OperationInterruptedException, IOException,
           InterruptedException {
-    PrintWriter out = context.getOut();
-    LineEditor in = context.getIn();
-    MessageFormatter fmt = context.getMessageFormatter();
+    final PrintWriter out = context.getOut();
+    final LineEditor in = context.getIn();
+    final MessageFormatter fmt = context.getMessageFormatter();
 
     for (; ; ) {
       try {
@@ -108,12 +110,12 @@ public abstract class EnumParameter extends CommandLineParameter {
             fmt.format(m_missingObjectQuestionKey)
                 + fmt.format("parser.parameter.enum.prompt.listall"));
         out.flush();
-        String line = in.readLine();
+        final String line = in.readLine();
         if (line.length() == 0) {
           throw new OperationInterruptedException();
         }
         if (line.trim().equals("?")) {
-          int selection =
+          final int selection =
               Parser.askForResolution(
                   context,
                   m_alternatives,
@@ -122,13 +124,12 @@ public abstract class EnumParameter extends CommandLineParameter {
                   m_headingKey,
                   m_allowPrefixes,
                   m_legendKeyPrefix);
-          return innerMatch((String) m_alternatives.get(selection), "");
+          return innerMatch(m_alternatives.get(selection), "");
         } else {
-          Match newMatch = innerMatch(line, "");
-          return newMatch;
+          return innerMatch(line, "");
         }
-      } catch (LineEditingDoneException e) {
-        continue;
+      } catch (final LineEditingDoneException e) {
+        // Nothing we need to do
       }
     }
   }

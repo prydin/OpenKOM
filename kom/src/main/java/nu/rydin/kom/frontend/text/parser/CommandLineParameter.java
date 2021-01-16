@@ -68,10 +68,9 @@ public abstract class CommandLineParameter extends CommandLinePart {
         if (line.length() == 0) {
           throw new OperationInterruptedException();
         }
-        final Match newMatch = innerMatch(line, "");
-        return newMatch;
+        return innerMatch(line, "");
       } catch (final LineEditingDoneException e) {
-        continue;
+        // Nothing to do
       }
     }
   }

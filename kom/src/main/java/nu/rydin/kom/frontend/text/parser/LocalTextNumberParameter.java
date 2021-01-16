@@ -14,36 +14,38 @@ package nu.rydin.kom.frontend.text.parser;
  * @author Henrik Schr�der
  */
 public class LocalTextNumberParameter extends CommandLineParameter {
-  public LocalTextNumberParameter(String missingObjectQuestionKey, boolean isRequired) {
+  public LocalTextNumberParameter(final String missingObjectQuestionKey, final boolean isRequired) {
     this(missingObjectQuestionKey, isRequired, null);
   }
 
-  public LocalTextNumberParameter(boolean isRequired) {
+  public LocalTextNumberParameter(final boolean isRequired) {
     this(isRequired, null);
   }
 
   public LocalTextNumberParameter(
-      String missingObjectQuestionKey, boolean isRequired, DefaultStrategy def) {
+          final String missingObjectQuestionKey, final boolean isRequired, final DefaultStrategy def) {
     super(missingObjectQuestionKey, isRequired, def);
   }
 
-  public LocalTextNumberParameter(boolean isRequired, DefaultStrategy def) {
+  public LocalTextNumberParameter(final boolean isRequired, final DefaultStrategy def) {
     super("parser.parameter.localtextnumber.ask", isRequired, def);
   }
 
+  @Override
   protected String getUserDescriptionKey() {
     return "parser.parameter.localtextnumber.description";
   }
 
-  protected Match innerMatch(String matchingPart, String remainder) {
-    String cooked = matchingPart.trim();
+  @Override
+  protected Match innerMatch(final String matchingPart, final String remainder) {
+    final String cooked = matchingPart.trim();
 
     try {
-      int number = Integer.parseInt(cooked);
+      final int number = Integer.parseInt(cooked);
       if (number > 0) {
-        return new Match(true, matchingPart, remainder, new Integer(number));
+        return new Match(true, matchingPart, remainder, number);
       }
-    } catch (NumberFormatException e) {
+    } catch (final NumberFormatException e) {
     }
     return new Match(false, null, null, null);
   }

@@ -29,9 +29,9 @@ public class CommandListParser extends DefaultHandler {
   private static final Class<?>[] s_commandCtorSignature =
       new Class<?>[] {Context.class, String.class, long.class};
 
-  private final Map<String, CommandCategory> m_categories = new HashMap<String, CommandCategory>();
+  private final Map<String, CommandCategory> m_categories = new HashMap<>();
 
-  private final List<Command> m_commands = new ArrayList<Command>();
+  private final List<Command> m_commands = new ArrayList<>();
 
   private final Context m_context;
 
@@ -39,22 +39,28 @@ public class CommandListParser extends DefaultHandler {
 
   private CommandCategory m_currentCat;
 
-  public CommandListParser(Context context) {
+  public CommandListParser(final Context context) {
     super();
     m_context = context;
   }
 
-  public void startElement(String namespaceURI, String localName, String qName, Attributes atts)
+  @Override
+  public void startElement(
+      final String namespaceURI, final String localName, final String qName, final Attributes atts)
       throws SAXException {
     switch (m_state) {
       case STATE_INITIAL:
         // Looking for "parser" node
         //
-        if (!"commandlist".equals(qName)) throw new SAXException("Node 'commandlist' expected");
+        if (!"commandlist".equals(qName)) {
+          throw new SAXException("Node 'commandlist' expected");
+        }
         m_state = STATE_COMMAND_LIST;
         break;
       case STATE_COMMAND_LIST:
-        if (!"category".equals(qName)) throw new SAXException("Node 'category' expected");
+        if (!"category".equals(qName)) {
+          throw new SAXException("Node 'category' expected");
+        }
         m_currentCat =
             new CommandCategory(
                 atts.getValue("id"),
@@ -66,22 +72,23 @@ public class CommandListParser extends DefaultHandler {
       case STATE_CATEGORY:
         {
           try {
-            if (!"command".equals(qName)) throw new SAXException("Node 'command' expected");
-            String className = atts.getValue("class");
-            Class<?> clazz = Class.forName(className);
-            Class<? extends Command> commandClazz = clazz.asSubclass(Command.class);
-            Constructor<? extends Command> commandCtor =
+            if (!"command".equals(qName)) {
+              throw new SAXException("Node 'command' expected");
+            }
+            final String className = atts.getValue("class");
+            final Class<?> clazz = Class.forName(className);
+            final Class<? extends Command> commandClazz = clazz.asSubclass(Command.class);
+            final Constructor<? extends Command> commandCtor =
                 commandClazz.getConstructor(s_commandCtorSignature);
-            String pString = atts.getValue("permissions");
-            long permissions = pString != null ? Long.parseLong(pString, 16) : 0L;
+            final String pString = atts.getValue("permissions");
+            final long permissions = pString != null ? Long.parseLong(pString, 16) : 0L;
 
             // Install primary command
             //
-            MessageFormatter formatter = m_context.getMessageFormatter();
-            String name = formatter.format(className + ".name");
+            final MessageFormatter formatter = m_context.getMessageFormatter();
+            final String name = formatter.format(className + ".name");
 
-            Command primaryCommand =
-                commandCtor.newInstance(new Object[] {m_context, name, new Long(permissions)});
+            final Command primaryCommand = commandCtor.newInstance(m_context, name, permissions);
             m_commands.add(primaryCommand);
             m_currentCat.addCommand(primaryCommand);
 
@@ -91,34 +98,32 @@ public class CommandListParser extends DefaultHandler {
             for (; ; ++aliasIdx) {
               // Try alias key
               //
-              String alias = formatter.getStringOrNull(clazz.getName() + ".name." + aliasIdx);
-              if (alias == null) break; // No more aliases
+              final String alias = formatter.getStringOrNull(clazz.getName() + ".name." + aliasIdx);
+              if (alias == null) {
+                break; // No more aliases
+              }
 
               // We found an alias! Create command.
               //
-              Command aliasCommand =
-                  commandCtor.newInstance(new Object[] {m_context, alias, new Long(permissions)});
+              final Command aliasCommand = commandCtor.newInstance(m_context, alias, permissions);
               m_commands.add(aliasCommand);
               m_currentCat.addCommand(aliasCommand);
             }
             m_state = STATE_COMMAND;
             break;
-          } catch (ClassNotFoundException e) {
-            throw new SAXException(e);
-          } catch (NoSuchMethodException e) {
-            throw new SAXException(e);
-          } catch (InstantiationException e) {
-            throw new SAXException(e);
-          } catch (IllegalAccessException e) {
-            throw new SAXException(e);
-          } catch (InvocationTargetException e) {
+          } catch (final ClassNotFoundException
+              | InvocationTargetException
+              | IllegalAccessException
+              | InstantiationException
+              | NoSuchMethodException e) {
             throw new SAXException(e);
           }
         }
     }
   }
 
-  public void endElement(String namespaceURI, String localName, String qName) throws SAXException {
+  @Override
+  public void endElement(final String namespaceURI, final String localName, final String qName) {
     switch (m_state) {
       case STATE_INITIAL:
         break;

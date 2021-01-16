@@ -11,12 +11,12 @@ package nu.rydin.kom.frontend.text.parser;
  * @author Henrik Schr�der
  */
 public final class Match {
-  private boolean m_isMatching;
-  private String m_remainder;
-  private String m_matchedString;
-  private Object m_parsedObject;
+  private final boolean m_isMatching;
+  private final String m_remainder;
+  private final String m_matchedString;
+  private final Object m_parsedObject;
 
-  public Match(boolean isMatching, String matchedString, String remainder, Object parsedObject) {
+  public Match(final boolean isMatching, final String matchedString, final String remainder, final Object parsedObject) {
     m_isMatching = isMatching;
     m_matchedString = matchedString;
     m_remainder = remainder;

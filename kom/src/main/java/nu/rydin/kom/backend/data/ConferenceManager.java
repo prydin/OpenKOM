@@ -342,7 +342,7 @@ public class ConferenceManager {
 
   public long countConferences() throws SQLException {
     try (final ResultSet rs = m_countStmt.executeQuery()) {
-      rs.first();
+      rs.next();
       return rs.getLong(1);
     }
   }
@@ -353,7 +353,7 @@ public class ConferenceManager {
       m_getParentCountForConfStmt.clearParameters();
       m_getParentCountForConfStmt.setLong(1, conf);
       rs = m_getParentCountForConfStmt.executeQuery();
-      rs.first();
+      rs.next();
       return rs.getLong(1);
     } finally {
       if (rs != null) {
@@ -364,7 +364,7 @@ public class ConferenceManager {
 
   public long getMaxParentCount() throws SQLException {
     try (final ResultSet rs = m_getMaxParentCountStmt.executeQuery()) {
-      rs.first();
+      rs.next();
       return rs.getLong(1);
     }
   }
