@@ -14,7 +14,7 @@ import java.io.Serializable;
 /**
  * A doubly-linked list atom
  *
- * @author <a href="mailto:pontus.rydin@frameworx.com">Pontus Rydin</a>
+ * @author Pontus Rydin
  */
 public class ListAtom implements Serializable {
   static final long serialVersionUID = 2005;

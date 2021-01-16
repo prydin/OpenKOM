@@ -23,7 +23,7 @@ import nu.rydin.kom.structs.NameAssociation;
 import nu.rydin.kom.utils.HeaderPrinter;
 import nu.rydin.kom.utils.PrintUtils;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class ListFiles extends AbstractCommand {
   public ListFiles(Context context, String fullname, long permissions) {
     super(fullname, new CommandLineParameter[] {new NamedObjectParameter(false)}, permissions);

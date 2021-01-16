@@ -14,7 +14,7 @@ import nu.rydin.kom.frontend.text.Context;
 import nu.rydin.kom.frontend.text.parser.CommandLineParameter;
 import nu.rydin.kom.frontend.text.parser.FlagParameter;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class ClearFlag extends AbstractCommand {
   public ClearFlag(Context context, String fullName, long permissions) {
     super(

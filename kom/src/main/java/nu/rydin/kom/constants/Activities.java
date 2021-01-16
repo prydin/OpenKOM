@@ -6,7 +6,7 @@
  */
 package nu.rydin.kom.constants;
 
-/** @author <a href=mailto:jepson@xyzzy.se>Jepson</a> */
+/** @author Jepson */
 public class Activities {
   public static final short AUTO = 0;
   public static final short MAIL = 1;

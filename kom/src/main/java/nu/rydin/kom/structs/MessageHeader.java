@@ -9,7 +9,7 @@ package nu.rydin.kom.structs;
 import java.io.Serializable;
 import java.sql.Timestamp;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class MessageHeader implements Serializable {
   static final long serialVersionUID = 2005;
 

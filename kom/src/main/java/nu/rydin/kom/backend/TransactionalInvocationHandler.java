@@ -11,21 +11,24 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import nu.rydin.kom.exceptions.InternalException;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class TransactionalInvocationHandler implements InvocationHandler {
   private final ServerSessionImpl m_session;
 
   private final CacheManager m_cacheManager = CacheManager.instance();
 
-  public TransactionalInvocationHandler(ServerSessionImpl session) {
+  public TransactionalInvocationHandler(final ServerSessionImpl session) {
     m_session = session;
   }
 
-  public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+  @Override
+  public Object invoke(final Object proxy, final Method method, final Object[] args) throws Throwable {
     // Don't even try if the session is invalid
     //
-    if (!m_session.isValid()) throw new InternalException("Invalid session!");
-    DataAccess da = DataAccessPool.instance().getDataAccess();
+    if (!m_session.isValid()) {
+      throw new InternalException("Invalid session!");
+    }
+    final DataAccess da = DataAccessPool.instance().getDataAccess();
     boolean committed = false;
     try {
       synchronized (m_session.m_userContext) {
@@ -36,7 +39,7 @@ public class TransactionalInvocationHandler implements InvocationHandler {
 
         // Invoke the method
         //
-        Object result = method.invoke(m_session, args);
+        final Object result = method.invoke(m_session, args);
         m_session.setDataAccess(null);
 
         // TODO: Synch the two commits
@@ -47,7 +50,7 @@ public class TransactionalInvocationHandler implements InvocationHandler {
         committed = true;
         return result;
       }
-    } catch (InvocationTargetException e) {
+    } catch (final InvocationTargetException e) {
       // Unwrap InvocationTargetExceptions
       //
       throw e.getTargetException();

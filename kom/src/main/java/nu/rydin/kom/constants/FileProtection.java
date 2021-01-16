@@ -6,7 +6,7 @@
  */
 package nu.rydin.kom.constants;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class FileProtection {
   public static int ALLOW_READ = 0x00000001;
   public static int ALLOW_WRITE = 0x00000002;

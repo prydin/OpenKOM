@@ -14,7 +14,7 @@ import nu.rydin.kom.frontend.text.parser.TextNumberParameter;
 import nu.rydin.kom.structs.Envelope;
 import nu.rydin.kom.structs.MessageLocator;
 
-/** @author <a href=mailto:jepson@xyzzy.se>Jepson</a> */
+/** @author Jepson */
 public class ReadFirstPost extends AbstractCommand {
   public ReadFirstPost(Context context, String fullName, long permissions) {
     super(fullName, new CommandLineParameter[] {new TextNumberParameter(false)}, permissions);

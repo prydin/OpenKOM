@@ -13,7 +13,7 @@ import nu.rydin.kom.frontend.text.AbstractCommand;
 import nu.rydin.kom.frontend.text.Context;
 import nu.rydin.kom.frontend.text.ansi.ANSISequences;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class ClearScreen extends AbstractCommand {
   public ClearScreen(Context context, String fullName, long permissions) {
     super(fullName, AbstractCommand.NO_PARAMETERS, permissions);

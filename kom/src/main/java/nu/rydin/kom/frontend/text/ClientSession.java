@@ -97,230 +97,74 @@ import nu.rydin.kom.structs.SessionState;
 import nu.rydin.kom.structs.UserInfo;
 import nu.rydin.kom.utils.FileUtils;
 import nu.rydin.kom.utils.HeaderPrinter;
-import nu.rydin.kom.utils.Logger;
 import nu.rydin.kom.utils.PrintUtils;
 import nu.rydin.kom.utils.StringUtils;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /**
- * @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a>
- * @author <a href=mailto:jepson@xyzzy.se>Jepson</a>
+ * @author Pontus Rydin
+ * @author Jepson
  * @author Henrik Schr�der
  * @author Magnus Ihse Bursie
  */
 public class ClientSession
     implements Runnable, Context, ClientEventTarget, TerminalSizeListener, EnvironmentListener {
+  private static final Logger LOG = LogManager.getLogger(ClientSession.class);
   private static final int MAX_LOGIN_RETRIES = 3;
   private static final String DEFAULT_CHARSET = "ISO-8859-1";
-
-  private LineEditor m_in;
-  private KOMWriter m_out;
-  private final InputStream m_rawIn;
-  private final OutputStream m_rawOut;
+  private final boolean m_useTicket;
+  private final LineEditor m_in;
+  private final KOMWriter m_out;
+  private final LinkedList<Event> m_displayMessageQueue = new LinkedList<>();
+  private final WordWrapperFactory m_wordWrapperFactory = new StandardWordWrapper.Factory();
+  private final EventPrinter eventPrinter;
+  private final String clientName;
   private MessageFormatter m_formatter = new MessageFormatter(Locale.getDefault(), "messages");
   private ServerSession m_session;
   private long m_userId;
-  private LinkedList<Event> m_displayMessageQueue = new LinkedList<Event>();
   private UserInfo m_thisUserCache;
-  private WordWrapperFactory m_wordWrapperFactory = new StandardWordWrapper.Factory();
   private int m_windowHeight = -1;
   private int m_windowWidth = -1;
   private boolean m_ListenToTerminalSize = true;
-  private EventPrinter eventPrinter;
-  private Locale m_locale;
   private DateFormatSymbols m_dateSymbols;
-  private final boolean m_useTicket;
   private SessionState m_state;
   private String m_ticket;
-  private String clientName;
   private int retriesBeforeLockout = 9;
   private long lockout = 900000;
-  private long failedLoginDelay = 3000;
-
   private Parser m_parser;
   private boolean m_loggedIn;
-
-  private class HeartbeatSender extends Thread implements KeystrokeListener {
-    private boolean m_idle = false;
-
-    public void keystroke(char ch) {
-      // Are we idle? Send heartbeat immediately!
-      //
-      if (m_idle) {
-        synchronized (this) {
-          this.notify();
-        }
-        m_idle = false;
-      }
-    }
-
-    public void run() {
-
-      for (; ; ) {
-        // Sleep for 30 seconds
-        //
-        try {
-          synchronized (this) {
-            this.wait(30000);
-          }
-        } catch (InterruptedException e) {
-          break;
-        }
-
-        // Any activity the last 30 seconds? Send hearbeat!
-        //
-        if (System.currentTimeMillis() - ClientSession.this.m_in.getLastKeystrokeTime() < 30000)
-          ClientSession.this.getSession().getHeartbeatListener().heartbeat();
-        else m_idle = true;
-      }
-    }
-  }
-
   private HeartbeatSender m_heartbeatSender;
 
-  private class EventPrinter implements EventTarget {
-    private Context context;
-
-    public EventPrinter(Context context) {
-      this.context = context;
-    }
-
-    private void printWrapped(String message, int offset) {
-      WordWrapper ww = getWordWrapper(message, getTerminalSettings().getWidth(), offset);
-      String line = null;
-      while ((line = ww.nextLine()) != null) {
-        m_out.println(line);
-      }
-    }
-
-    public void onEvent(Event event) {
-      // Unknown event. Not much we can do.
-    }
-
-    public void onEvent(ChatMessageEvent event) {
-      this.beepMaybe(UserFlags.BEEP_ON_CHAT);
-      String header =
-          m_formatter.format(
-              "event.chat",
-              new Object[] {formatObjectName(event.getUserName(), event.getOriginatingUser())});
-      getDisplayController().chatMessageHeader();
-      m_out.print(header);
-      getDisplayController().chatMessageBody();
-      printWrapped(event.getMessage(), header.length());
-      m_out.println();
-    }
-
-    public void onEvent(BroadcastMessageEvent event) {
-      try {
-        boolean more =
-            (context.getCachedUserInfo().getFlags1() & UserFlags.MORE_PROMPT_IN_BROADCAST) != 0;
-        context.getIn().setPageBreak(more);
-        this.beepMaybe(UserFlags.BEEP_ON_BROADCAST);
-        String name = formatObjectName(event.getUserName(), event.getOriginatingUser());
-        String header =
-            event.getKind() == MessageLogKinds.BROADCAST
-                ? m_formatter.format("event.broadcast.default", new Object[] {name})
-                : name + ' ';
-        getDisplayController().broadcastMessageHeader();
-        m_out.print(header);
-        if (event.getKind() == MessageLogKinds.BROADCAST) {
-          getDisplayController().broadcastMessageBody();
-        }
-        printWrapped(event.getMessage(), header.length());
-        m_out.println();
-        context.getIn().setPageBreak(true);
-      } catch (UnexpectedException e) {
-        Logger.error(this, "Error in broadcast message handler", e);
-      }
-    }
-
-    public void onEvent(ChatAnonymousMessageEvent event) {
-      this.beepMaybe(UserFlags.BEEP_ON_CHAT);
-      String header = m_formatter.format("event.chat.anonymous");
-      getDisplayController().chatMessageHeader();
-      m_out.print(header);
-      getDisplayController().chatMessageBody();
-      printWrapped(event.getMessage(), header.length());
-      m_out.println();
-    }
-
-    public void onEvent(BroadcastAnonymousMessageEvent event) {
-      this.beepMaybe(UserFlags.BEEP_ON_BROADCAST);
-      String header = m_formatter.format("event.broadcast.anonymous");
-      getDisplayController().broadcastMessageHeader();
-      m_out.print(header);
-      getDisplayController().broadcastMessageBody();
-      printWrapped(event.getMessage(), header.length());
-      m_out.println();
-    }
-
-    public void onEvent(NewMessageEvent event) {
-      // This event should not be handled here
-    }
-
-    public void onEvent(UserAttendanceEvent event) {
-      getDisplayController().broadcastMessageHeader();
-      this.beepMaybe(UserFlags.BEEP_ON_ATTENDANCE);
-      m_out.println(
-          m_formatter.format(
-              "event.attendance." + event.getType(),
-              new Object[] {
-                context.formatObjectName(event.getUserName(), event.getOriginatingUser())
-              }));
-      m_out.println();
-    }
-
-    public void onEvent(ReloadUserProfileEvent event) {
-      // This event should not be handled here
-    }
-
-    public void onEvent(MessageDeletedEvent event) {
-      // This event should not be handled here
-    }
-
-    protected void beepMaybe(long flag) {
-      try {
-        // Beep if user wants it
-        //
-        if ((ClientSession.this.getCachedUserInfo().getFlags1() & flag) != 0) m_out.print('\u0007');
-      } catch (UnexpectedException e) {
-        // Should NOT happen!
-        //
-        throw new RuntimeException(e);
-      }
-    }
-  }
-
   public ClientSession(
-      InputStream in,
-      OutputStream out,
-      boolean useTicket,
-      boolean selfRegister,
-      String clientName,
-      Map<String, String> parameters)
+      final InputStream in,
+      final OutputStream out,
+      final boolean useTicket,
+      final boolean selfRegister,
+      final String clientName,
+      final Map<String, String> parameters)
       throws UnexpectedException, InternalException {
     // Unpack properties
     //
 
     try {
       retriesBeforeLockout = Integer.parseInt(parameters.get("attempts"));
-    } catch (NullPointerException e) {
-    } // Just keep default
-    catch (NumberFormatException e) {
-      Logger.warn(this, "Error parsing 'attempts' parameter, using default");
+    } catch (final NullPointerException e) {
+      // Just keep default
+    } catch (final NumberFormatException e) {
+      LOG.warn("Error parsing 'attempts' parameter, using default");
     }
 
     try {
       lockout = Long.parseLong(parameters.get("lockout"));
-    } catch (NullPointerException e) {
-    } // Just keep default
-    catch (NumberFormatException e) {
-      Logger.warn(this, "Error parsing 'lockout' parameter, using default");
+    } catch (final NullPointerException e) {
+      // Just keep default
+    } catch (final NumberFormatException e) {
+      LOG.warn("Error parsing 'lockout' parameter, using default");
     }
 
     // Set up I/O
     //
-    m_rawIn = in;
-    m_rawOut = out;
     this.clientName = clientName;
     eventPrinter = new EventPrinter(this);
 
@@ -330,21 +174,24 @@ public class ClientSession
 
     // Install commands and init parser
     //
-    this.installCommands();
+    installCommands();
 
     // More I/O
     //
     try {
-      m_out = new KOMWriter(m_rawOut, DEFAULT_CHARSET);
-      m_in = new LineEditor(m_rawIn, m_out, this, this, null, m_formatter, DEFAULT_CHARSET);
+      m_out = new KOMWriter(out, ClientSession.DEFAULT_CHARSET);
+      m_in =
+          new LineEditor(in, m_out, this, this, null, m_formatter, ClientSession.DEFAULT_CHARSET);
       m_out.addNewlineListener(m_in);
-    } catch (UnsupportedEncodingException e) {
+    } catch (final UnsupportedEncodingException e) {
       // There're NO WAY we don't support US-ASCII!
       //
-      throw new InternalException(DEFAULT_CHARSET + " not supported. Your JVM is broken!");
+      throw new InternalException(
+          ClientSession.DEFAULT_CHARSET + " not supported. Your JVM is broken!");
     }
   }
 
+  @Override
   public void run() {
     try {
       // Start keystroke poller
@@ -355,12 +202,12 @@ public class ClientSession
       //
       if (!m_useTicket) {
         try {
-          String content = FileUtils.loadTextFromResource("welcome.txt");
+          final String content = FileUtils.loadTextFromResource("welcome.txt");
           PrintUtils.printIndented(m_out, content, 80, 0);
           m_out.println();
-        } catch (FileNotFoundException e) {
+        } catch (final FileNotFoundException e) {
           // No message defined, no problem.
-        } catch (IOException e) {
+        } catch (final IOException e) {
           m_out.println("This should not happen!");
         }
       }
@@ -369,49 +216,44 @@ public class ClientSession
       //
       UserInfo userInfo = null;
       try {
-        for (int idx = 0; idx < MAX_LOGIN_RETRIES; ++idx) {
+        for (int idx = 0; idx < ClientSession.MAX_LOGIN_RETRIES; ++idx) {
           try {
-            userInfo = this.login();
+            userInfo = login();
             m_userId = userInfo.getId();
             Thread.currentThread().setName("Session (" + userInfo.getUserid() + ")");
             break;
-          } catch (AuthenticationException e) {
+          } catch (final AuthenticationException e) {
             // Logging in with ticket? This HAS to work
             //
-            if (m_useTicket) return;
+            if (m_useTicket) {
+              return;
+            }
             m_out.println(m_formatter.format("login.failure"));
-            Logger.info(this, "Failed login");
+            LOG.info("Failed login");
           }
         }
-      } catch (LoginProhibitedException e) {
+      } catch (final LoginProhibitedException | LoginNotAllowedException e) {
         m_out.println();
         m_out.println(e.formatMessage(this));
         m_out.println();
         return;
-      } catch (LoginNotAllowedException e) {
-        m_out.println();
-        m_out.println(e.formatMessage(this));
-        m_out.println();
-        return;
-      } catch (InterruptedException e) {
+      } catch (final InterruptedException | OperationInterruptedException e) {
         // Interrupted during login
         //
         return;
-      } catch (OperationInterruptedException e) {
-        // Interrupted during login
-        //
-        return;
-      } catch (Exception e) {
+      } catch (final Exception e) {
         // Unhandled exception while logging in?
         // I'm afraid the ride is over...
         //
-        Logger.warn(this, "Unhandled exception during login?", e);
+        LOG.warn("Unhandled exception during login?", e);
         return;
       }
 
       // Didn't manage to log in? Game over!
       //
-      if (userInfo == null) return;
+      if (userInfo == null) {
+        return;
+      }
 
       // Set up IO with the correct character set
       //
@@ -421,10 +263,12 @@ public class ClientSession
           m_out.setCharset(charSet);
           m_in.setCharset(charSet);
           break;
-        } catch (UnsupportedEncodingException e) {
+        } catch (final UnsupportedEncodingException e) {
           // Doesn't even support plain US-ASCII? We're outta here
           //
-          if (charSet.equals("US-ASCII")) throw new RuntimeException("No suitable character set!");
+          if (charSet.equals("US-ASCII")) {
+            throw new RuntimeException("No suitable character set!");
+          }
 
           // Resort to US-ASCII
           //
@@ -434,58 +278,62 @@ public class ClientSession
 
       // Replace message formatter with a localized one
       //
-      String locale = userInfo.getLocale();
+      final String locale = userInfo.getLocale();
+      final Locale m_locale;
       if (locale != null) {
-        int p = locale.indexOf('_');
+        final int p = locale.indexOf('_');
         m_locale =
             p != -1
                 ? new Locale(locale.substring(0, p), locale.substring(p + 1))
                 : new Locale(locale);
         m_formatter = new MessageFormatter(m_locale, "messages");
-      } else m_locale = Locale.getDefault();
+      } else {
+        m_locale = Locale.getDefault();
+      }
       m_dateSymbols = new DateFormatSymbols(m_locale);
       m_formatter.setTimeZone(userInfo.getTimeZone());
 
       m_out.println(m_formatter.format("login.welcome", userInfo.getName()));
       m_out.println();
 
-      userInfo = null; // Don't need it anymore... Let it be GC'd
-
       // Print motd (if any)
       //
       try {
-        String motd = m_session.readSystemFile(SystemFiles.WELCOME_MESSAGE);
-        this.getDisplayController().output();
+        final String motd = m_session.readSystemFile(SystemFiles.WELCOME_MESSAGE);
+        getDisplayController().output();
         m_out.println();
-        WordWrapper ww = this.getWordWrapper(motd);
+        final WordWrapper ww = getWordWrapper(motd);
         String line;
-        while ((line = ww.nextLine()) != null) m_out.println(line);
+        while ((line = ww.nextLine()) != null) {
+          m_out.println(line);
+        }
         m_out.println();
-      } catch (ObjectNotFoundException e) {
+      } catch (final ObjectNotFoundException e) {
         // No motd. No big deal.
-      } catch (AuthorizationException e) {
-        Logger.error(this, "Users don't have permission for motd");
-      } catch (UnexpectedException e) {
-        Logger.error(this, e);
+      } catch (final AuthorizationException e) {
+        LOG.error("Users don't have permission for motd");
+      } catch (final UnexpectedException e) {
+        LOG.error(e);
       }
 
       // Run the login and profile script
       //
-      this.getDisplayController().normal();
+      getDisplayController().normal();
       try {
         // Get profile scripts
         //
-        FileStatus[] profiles = m_session.listFiles(this.getLoggedInUserId(), ".profile.%.cmd");
-        int nProfiles = profiles.length;
+        final FileStatus[] profiles = m_session.listFiles(getLoggedInUserId(), ".profile.%.cmd");
+        final int nProfiles = profiles.length;
         String profile = null;
-        if (nProfiles == 1) profile = profiles[0].getName();
-        else if (nProfiles > 1) {
+        if (nProfiles == 1) {
+          profile = profiles[0].getName();
+        } else if (nProfiles > 1) {
           // More than one profile. Ask user.
           //
           for (; ; ) {
             m_out.println(m_formatter.format("login.profiles"));
             for (int idx = 0; idx < nProfiles; ++idx) {
-              String name = profiles[idx].getName();
+              final String name = profiles[idx].getName();
               m_out.print(idx + 1);
               m_out.print(". ");
               m_out.println(name.substring(9, name.length() - 4));
@@ -493,26 +341,21 @@ public class ClientSession
             m_out.println();
             m_out.print(m_formatter.format("login.choose.profile"));
             try {
-              String choiceStr = m_in.innerReadLine("1", "", 3, 0);
+              final String choiceStr = m_in.innerReadLine("1", "", 3, 0);
               try {
-                int choice = Integer.parseInt(choiceStr);
+                final int choice = Integer.parseInt(choiceStr);
                 profile = profiles[choice - 1].getName();
                 break;
-              } catch (NumberFormatException e) {
-                // Bad choice
-                //
-                m_out.println();
-                m_out.println(m_formatter.format("login.profil.invalid.choice"));
-              } catch (ArrayIndexOutOfBoundsException e) {
+              } catch (final NumberFormatException | ArrayIndexOutOfBoundsException e) {
                 // Bad choice
                 //
                 m_out.println();
                 m_out.println(m_formatter.format("login.profil.invalid.choice"));
               }
-            } catch (EventDeliveredException e) {
+            } catch (final EventDeliveredException e) {
               // Should not happen
               //
-              throw new UnexpectedException(this.getLoggedInUserId(), e);
+              throw new UnexpectedException(getLoggedInUserId(), e);
             }
           }
         }
@@ -520,31 +363,34 @@ public class ClientSession
         String loginScript = null;
         String profileScript = null;
         try {
-          loginScript = m_session.readFile(this.getLoggedInUserId(), ".login.cmd");
-          if (profile != null)
-            profileScript = m_session.readFile(this.getLoggedInUserId(), profile);
-        } catch (ObjectNotFoundException e) {
+          loginScript = m_session.readFile(getLoggedInUserId(), ".login.cmd");
+          if (profile != null) {
+            profileScript = m_session.readFile(getLoggedInUserId(), profile);
+          }
+        } catch (final ObjectNotFoundException e) {
           // No login script. Not much to do
           //
         }
         try {
-          if (profileScript != null) this.executeScript(profileScript);
-          if (loginScript != null) this.executeScript(loginScript);
-        } catch (OutputInterruptedException e) {
+          if (profileScript != null) {
+            executeScript(profileScript);
+          }
+          if (loginScript != null) {
+            executeScript(loginScript);
+          }
+        } catch (final OutputInterruptedException e) {
           m_out.println(e.formatMessage(this));
           m_out.println();
-        } catch (OperationInterruptedException e) {
+        } catch (final OperationInterruptedException e) {
           m_out.println(e.formatMessage(this));
           m_out.println();
         }
-      } catch (KOMException e) {
+      } catch (final KOMException e) {
         m_out.println(e.formatMessage(this));
         m_out.println();
-      } catch (IOException e) {
+      } catch (final IOException e) {
         e.printStackTrace(m_out);
-      } catch (InterruptedException e) {
-        return;
-      } catch (ImmediateShutdownException e) {
+      } catch (final InterruptedException | ImmediateShutdownException e) {
         return;
       }
 
@@ -556,19 +402,19 @@ public class ClientSession
       m_in.setKeystrokeListener(m_heartbeatSender);
 
       // Ensure that more prompts will be shown (if the user choose goAhead during login).
-      this.getIn().setPageBreak(true);
+      getIn().setPageBreak(true);
 
       // MAIN SCREEN TURN ON!
       //
-      this.mainloop();
+      mainloop();
       m_out.println();
       m_out.println();
       try {
-        m_out.println(m_formatter.format("login.goodbye", this.getCachedUserInfo().getName()));
-      } catch (UnexpectedException e) {
+        m_out.println(m_formatter.format("login.goodbye", getCachedUserInfo().getName()));
+      } catch (final UnexpectedException e) {
         // Probably issues getting hold of user. Just get us out of here!
         //
-        Logger.error(this, "Error logging out", e);
+        LOG.error("Error logging out", e);
       }
     } finally {
       // Shut down...
@@ -582,10 +428,10 @@ public class ClientSession
             m_session = null;
           }
         }
-      } catch (Exception e) {
+      } catch (final Exception e) {
         // Ooops! Exception while cleaning up!
         //
-        Logger.error(this, m_formatter.format("logout.failure"), e);
+        LOG.error(m_formatter.format("logout.failure"), e);
       }
     }
   }
@@ -596,20 +442,21 @@ public class ClientSession
           NoSuchModuleException, AuthorizationException {
     // Find backend. We are going to need it
     //
-    ServerSessionFactory ssf = (ServerSessionFactory) Modules.getModule("Backend");
-    boolean selfRegister = ssf.allowsSelfRegistration();
+    final ServerSessionFactory ssf = (ServerSessionFactory) Modules.getModule("Backend");
+    final boolean selfRegister = ssf.allowsSelfRegistration();
 
     // Collect information
     //
     String ticket = null;
     String password = null;
     String userid = null;
-    if (m_useTicket) ticket = this.waitForTicket();
-    else {
+    if (m_useTicket) {
+      ticket = waitForTicket();
+    } else {
       try {
         // Print self-registration prompt if requested
         //
-        String srToken = m_formatter.format("login.self.register.token");
+        final String srToken = m_formatter.format("login.self.register.token");
         if (selfRegister) {
 
           m_out.println(m_formatter.format("login.self.register", srToken));
@@ -622,18 +469,18 @@ public class ClientSession
         // Self registration?
         //
         if (selfRegister && srToken.equals(userid)) {
-          String[] login = this.selfRegister();
+          final String[] login = selfRegister();
           userid = login[0];
           password = login[1];
         } else {
           // Normal login
           //
-          Logger.info(this, "Trying to login as: " + userid);
+          LOG.info("Trying to login as: " + userid);
           m_out.print(m_formatter.format("login.password"));
           m_out.flush();
           password = m_in.readLine(null, null, 100, 0);
         }
-      } catch (LineEditorException e) {
+      } catch (final LineEditorException e) {
         throw new RuntimeException("This should not happen!", e);
       }
     }
@@ -646,7 +493,7 @@ public class ClientSession
               ? ssf.login(ticket, ClientTypes.TTY, false)
               : ssf.login(userid, password, ClientTypes.TTY, false);
       ssf.notifySuccessfulLogin(clientName);
-    } catch (AuthenticationException e) {
+    } catch (final AuthenticationException e) {
       // For ticket-based logins, this will be handles elsewhere
       //
       if (!m_useTicket) {
@@ -654,13 +501,14 @@ public class ClientSession
 
         // Sleep for a while to make brute force attacks a bit harder...
         //
+        final long failedLoginDelay = 3000;
         Thread.sleep(failedLoginDelay);
 
         // Rethrow, we will handle this in the mainloop of the shell
         //
         throw e;
       }
-    } catch (AlreadyLoggedInException e) {
+    } catch (final AlreadyLoggedInException e) {
       // Already logged in. Ask if they want to create another session
       //
       m_out.println(m_formatter.format("login.multiple.session"));
@@ -668,7 +516,7 @@ public class ClientSession
 
       // Print headers
       //
-      HeaderPrinter hp = new HeaderPrinter();
+      final HeaderPrinter hp = new HeaderPrinter();
       hp.addHeader(m_formatter.format("list.sessions.session"), 7, true);
       hp.addHeader(m_formatter.format("list.sessions.login"), 7, true);
       hp.addHeader(m_formatter.format("list.sessions.idle"), 7, true);
@@ -680,14 +528,13 @@ public class ClientSession
       hp.printOn(m_out);
 
       // Print list
-      List<SessionListItem> list = e.getSessions();
-      for (Iterator<SessionListItem> itor = list.iterator(); itor.hasNext(); ) {
-        SessionListItem each = itor.next();
+      final List<SessionListItem> list = e.getSessions();
+      for (final SessionListItem each : list) {
         PrintUtils.printRightJustified(m_out, Integer.toString(each.getSessionId()), 7);
-        long now = System.currentTimeMillis();
+        final long now = System.currentTimeMillis();
         PrintUtils.printRightJustified(
             m_out, StringUtils.formatElapsedTime(now - each.getLoginTime()), 7);
-        long idle = now - each.getLastHeartbeat();
+        final long idle = now - each.getLastHeartbeat();
         PrintUtils.printRightJustified(
             m_out,
             idle >= 60000 ? StringUtils.formatElapsedTime(now - each.getLastHeartbeat()) : "",
@@ -705,7 +552,7 @@ public class ClientSession
       m_out.println();
       m_out.flush();
       try {
-        int choice =
+        final int choice =
             m_in.getChoice(
                 m_formatter.format("login.multiple.session.question"),
                 new String[] {"1", "2", "3"},
@@ -719,9 +566,12 @@ public class ClientSession
           case 2:
             // Kill all other sessions
             //
-            for (Iterator<SessionListItem> itor = list.iterator(); itor.hasNext(); ) {
-              if (m_useTicket) ssf.killSession(itor.next().getSessionId(), m_ticket);
-              else ssf.killSession(itor.next().getSessionId(), userid, password);
+            for (final Iterator<SessionListItem> itor = list.iterator(); itor.hasNext(); ) {
+              if (m_useTicket) {
+                ssf.killSession(itor.next().getSessionId(), m_ticket);
+              } else {
+                ssf.killSession(itor.next().getSessionId(), userid, password);
+              }
             }
 
             // FALL THRU
@@ -733,27 +583,29 @@ public class ClientSession
                   m_useTicket
                       ? ssf.login(ticket, ClientTypes.TTY, true)
                       : ssf.login(userid, password, ClientTypes.TTY, true);
-            } catch (AlreadyLoggedInException e1) {
+            } catch (final AlreadyLoggedInException e1) {
               // Huh? We DID allow this!
               //
-              Logger.error(this, "This cannot happen!", e1);
+              LOG.error("This cannot happen!", e1);
             }
-            Logger.info(this, "Allowed multiple login.");
+            LOG.info("Allowed multiple login.");
         }
-      } catch (LineEditingDoneException e1) {
+      } catch (final LineEditingDoneException e1) {
         throw new RuntimeException("This should not happen", e1);
       }
     }
     // User was authenticated! Now check if they are allowed to log in.
     //
-    UserInfo user = m_session.getLoggedInUser();
-    if (!user.hasRights(UserPermissions.LOGIN)) throw new LoginNotAllowedException();
+    final UserInfo user = m_session.getLoggedInUser();
+    if (!user.hasRights(UserPermissions.LOGIN)) {
+      throw new LoginNotAllowedException();
+    }
 
     // Everything seems fine! We're in!
     //
     m_in.setSession(m_session);
     m_loggedIn = true;
-    Logger.info(this, "Successfully logged in as: " + m_session.getLoggedInUser().getUserid());
+    LOG.info("Successfully logged in as: " + m_session.getLoggedInUser().getUserid());
     return user;
   }
 
@@ -764,18 +616,20 @@ public class ClientSession
           UnexpectedException {
     // Find backend. We are going to need it
     //
-    ServerSessionFactory ssf = (ServerSessionFactory) Modules.getModule("Backend");
+    final ServerSessionFactory ssf = (ServerSessionFactory) Modules.getModule("Backend");
 
     // Ask for character set
     //
-    String charSet = "ISO-8859-1";
-    ArrayList<String> list = new ArrayList<String>();
-    for (StringTokenizer st = new StringTokenizer(ClientSettings.getCharsets(), ",");
-        st.hasMoreTokens(); ) list.add(st.nextToken());
+    String charSet;
+    final ArrayList<String> list = new ArrayList<>();
+    for (final StringTokenizer st = new StringTokenizer(ClientSettings.getCharsets(), ",");
+        st.hasMoreTokens(); ) {
+      list.add(st.nextToken());
+    }
     for (; ; ) {
       m_out.println();
       try {
-        int n =
+        final int n =
             Parser.askForResolution(
                 this,
                 list,
@@ -784,11 +638,11 @@ public class ClientSession
                 "parser.parameter.charset.ask",
                 false,
                 "charset");
-        charSet = (String) list.get(n);
+        charSet = list.get(n);
         m_in.setCharset(charSet);
         m_out.setCharset(charSet);
         break;
-      } catch (InvalidChoiceException e) {
+      } catch (final InvalidChoiceException e) {
         // Try again
       }
     }
@@ -801,8 +655,12 @@ public class ClientSession
         m_out.print(m_formatter.format("login.self.register.login"));
         m_out.flush();
         userid = m_in.readLine(null, null, 100, LineEditor.FLAG_ECHO);
-        if (userid.length() == 0) continue;
-        if (!ssf.loginExits(userid)) break;
+        if (userid.length() == 0) {
+          continue;
+        }
+        if (!ssf.loginExits(userid)) {
+          break;
+        }
         m_out.println(m_formatter.format("login.self.register.duplicate"));
         m_out.println();
       }
@@ -810,20 +668,23 @@ public class ClientSession
         m_out.print(m_formatter.format("login.self.register.password"));
         m_out.flush();
         password = m_in.readLine(null, null, 100, 0);
-        if (password.length() == 0) continue;
+        if (password.length() == 0) {
+          continue;
+        }
         m_out.print(m_formatter.format("login.self.register.password.verify"));
         m_out.flush();
-        String verify = m_in.readLine(null, null, 100, 0);
-        if (password.equals(verify)) break;
+        final String verify = m_in.readLine(null, null, 100, 0);
+        if (password.equals(verify)) {
+          break;
+        }
         m_out.println(m_formatter.format("login.self.register.password.mismatch"));
         m_out.println();
       }
-      for (; ; ) {
+      do {
         m_out.print(m_formatter.format("login.self.register.fullname"));
         m_out.flush();
         fullname = m_in.readLine(null, null, 100, LineEditor.FLAG_ECHO);
-        if (fullname.length() > 0) break;
-      }
+      } while (fullname.length() <= 0);
 
       // Register user
       //
@@ -831,43 +692,47 @@ public class ClientSession
         ssf.selfRegister(userid, password, fullname, charSet);
         m_out.println();
         return new String[] {userid, password, fullname};
-      } catch (DuplicateNameException e) {
-        m_out.println(m_formatter.format("login.self.register.duplicate.name"));
-        m_out.println();
-      } catch (AmbiguousNameException e) {
+      } catch (final DuplicateNameException | AmbiguousNameException e) {
         m_out.println(m_formatter.format("login.self.register.duplicate.name"));
         m_out.println();
       }
     }
   }
 
-  public synchronized void shutdown() throws UnexpectedException {
-    if (m_heartbeatSender != null) m_heartbeatSender.interrupt();
+  public synchronized void shutdown() {
+    if (m_heartbeatSender != null) {
+      m_heartbeatSender.interrupt();
+    }
     m_in.shutdown();
     if (m_session != null) {
       try {
         m_session.close();
-      } catch (Exception e) {
+      } catch (final Exception e) {
         // Trying to close an invalid session. Not much
         // to do really...
         //
-        Logger.warn(this, "Error while closing session: " + e.toString());
+        LOG.warn("Error while closing session: " + e.toString());
       }
       m_session = null;
     }
   }
 
-  public void executeScript(String script) throws IOException, InterruptedException, KOMException {
-    this.executeScript(new BufferedReader(new StringReader(script)));
+  @Override
+  public void executeScript(final String script)
+      throws IOException, InterruptedException, KOMException {
+    executeScript(new BufferedReader(new StringReader(script)));
   }
 
-  public void executeScript(BufferedReader rdr)
+  @Override
+  public void executeScript(final BufferedReader rdr)
       throws IOException, InterruptedException, KOMException {
     String line;
     while ((line = rdr.readLine()) != null) {
       line = line.trim();
-      if (line.length() == 0 || line.charAt(0) == '#') continue;
-      ExecutableCommand executableCommand = m_parser.parseCommandLine(this, line);
+      if (line.length() == 0 || line.charAt(0) == '#') {
+        continue;
+      }
+      final ExecutableCommand executableCommand = m_parser.parseCommandLine(this, line);
       executableCommand.executeBatch(this);
       m_out.println();
     }
@@ -875,14 +740,11 @@ public class ClientSession
 
   public void mainloop() {
     try {
-      this.printCurrentConference();
-    } catch (ObjectNotFoundException e) {
+      printCurrentConference();
+    } catch (final ObjectNotFoundException | UnexpectedException e) {
       // TODO: Default conference deleted. What do we do???
       //
-      Logger.error(this, e);
-      m_out.println(e.formatMessage(this));
-    } catch (UnexpectedException e) {
-      Logger.error(this, e);
+      LOG.error(e);
       m_out.println(e.formatMessage(this));
     }
     m_out.println();
@@ -892,21 +754,21 @@ public class ClientSession
       try {
         // Print any pending chat messages
         //
-        DisplayController dc = this.getDisplayController();
+        final DisplayController dc = getDisplayController();
         synchronized (m_displayMessageQueue) {
           while (!m_displayMessageQueue.isEmpty()) {
-            Event ev = (Event) m_displayMessageQueue.removeFirst();
+            final Event ev = m_displayMessageQueue.removeFirst();
             ev.dispatch(eventPrinter);
           }
         }
-        Command defaultCommand = this.getDefaultCommand();
+        final Command defaultCommand = getDefaultCommand();
         dc.prompt();
 
         // Build prompt
         //
-        StringBuffer promptBuffer = new StringBuffer(50);
+        final StringBuilder promptBuffer = new StringBuilder(50);
         promptBuffer.append(defaultCommand.getFullName());
-        if ((this.getCachedUserInfo().getFlags1() & UserFlags.SHOW_NUM_UNREAD) != 0
+        if ((getCachedUserInfo().getFlags1() & UserFlags.SHOW_NUM_UNREAD) != 0
             && m_state.getNumUnread() > 0) {
           // Add number of unread to prompt
           //
@@ -915,7 +777,7 @@ public class ClientSession
           promptBuffer.append(']');
         }
         promptBuffer.append(" - ");
-        String prompt = promptBuffer.toString();
+        final String prompt = promptBuffer.toString();
         m_out.print(prompt);
         dc.input();
         m_out.flush();
@@ -926,7 +788,7 @@ public class ClientSession
 
         // Read command
         //
-        String cmdString = null;
+        final String cmdString;
         try {
           cmdString =
               m_in.readLine(
@@ -938,62 +800,61 @@ public class ClientSession
                       | LineEditor.FLAG_STOP_ON_EVENT
                       | LineEditor.FLAG_STOP_ONLY_WHEN_EMPTY
                       | LineEditor.FLAG_ALLOW_HISTORY
-                      | ((this.getCachedUserInfo().getFlags1() & UserFlags.TREAT_SPACE_AS_NEWLINE)
-                              != 0
+                      | ((getCachedUserInfo().getFlags1() & UserFlags.TREAT_SPACE_AS_NEWLINE) != 0
                           ? LineEditor.FLAG_TREAT_SPACE_AS_NEWLINE
                           : 0));
-        } catch (EventDeliveredException e) {
+        } catch (final EventDeliveredException e) {
           // Interrupted by an event. Generate prompt and start
           // over again.
           //
           // Erase the prompt
           //
-          if ((this.getCachedUserInfo().getFlags1() & UserFlags.BEEP_ON_NEW_MESSAGES) != 0
-              && (e.getEvent() instanceof NewMessageEvent)) m_out.print('\u0007'); // BEEP!
-          int top = prompt.length();
-          for (int idx = 0; idx < top; ++idx) m_out.print("\b \b");
+          if ((getCachedUserInfo().getFlags1() & UserFlags.BEEP_ON_NEW_MESSAGES) != 0
+              && (e.getEvent() instanceof NewMessageEvent)) {
+            m_out.print('\u0007'); // BEEP!
+          }
+          final int top = prompt.length();
+          for (int idx = 0; idx < top; ++idx) {
+            m_out.print("\b \b");
+          }
           continue;
         }
 
         if (cmdString.trim().length() > 0) {
-          ExecutableCommand executableCommand = m_parser.parseCommandLine(this, cmdString);
+          final ExecutableCommand executableCommand = m_parser.parseCommandLine(this, cmdString);
           executableCommand.execute(this);
         } else {
           new ExecutableCommand(defaultCommand, new Object[0]).execute(this);
         }
-      } catch (OutputInterruptedException e) {
+      } catch (final OutputInterruptedException e) {
         m_out.println();
         m_out.println(e.formatMessage(this));
         m_out.println();
-      } catch (UserException e) {
+      } catch (final UserException e) {
         m_out.println();
         m_out.println(e.formatMessage(this));
         m_out.println();
-      } catch (InterruptedException e) {
+      } catch (final InterruptedException | ImmediateShutdownException e) {
         // SOMEONE SET UP US THE BOMB! Let's get out of here!
         // Can happen if connection is lost, or if an admin
         // requested shutdown.
         //
         return;
-      } catch (ImmediateShutdownException e) {
-        // SOMEONE SET UP US THE *BIG* BOMB!
-        //
-        return;
-      } catch (KOMRuntimeException e) {
+      } catch (final KOMRuntimeException e) {
         m_out.println(e.formatMessage(this));
         m_out.println();
-        Logger.error(this, e);
-      } catch (Exception e) {
+        LOG.error(e);
+      } catch (final Exception e) {
         e.printStackTrace(m_out);
         m_out.println();
-        Logger.error(this, e);
+        LOG.error(e);
       }
     }
   }
 
   public Command getDefaultCommand() throws KOMException {
     m_state = m_session.getSessionState();
-    short suggestion = m_state.getSuggestedAction();
+    final short suggestion = m_state.getSuggestedAction();
     switch (suggestion) {
       case CommandSuggestions.NEXT_SELECTED:
         return m_parser.getCommand(ReadNextSelectedMessage.class);
@@ -1011,31 +872,35 @@ public class ClientSession
         m_out.println("TODO: Add message saying thing are screwed up");
         return m_parser.getCommand(ShowTime.class);
       default:
-        Logger.warn(this, "Unknown command suggestion: " + suggestion);
+        LOG.warn("Unknown command suggestion: " + suggestion);
         return m_parser.getCommand(ShowTime.class);
     }
   }
 
   // Implementation of the Context interface
   //
+  @Override
   public LineEditor getIn() {
     return m_in;
   }
 
+  @Override
   public KOMWriter getOut() {
     return m_out;
   }
 
+  @Override
   public MessageFormatter getMessageFormatter() {
     return m_formatter;
   }
 
+  @Override
   public MessagePrinter getMessagePrinter() {
     boolean usecompact = false;
     try {
-      usecompact = this.isFlagSet(0, UserFlags.USE_COMPACT_MESSAGEPRINTER);
-    } catch (ObjectNotFoundException e) {
-    } catch (UnexpectedException e) {
+      usecompact = isFlagSet(0, UserFlags.USE_COMPACT_MESSAGEPRINTER);
+    } catch (final UnexpectedException e) {
+      // TODO: What to do?
     }
     if (usecompact) {
       return new CompactMessagePrinter();
@@ -1044,23 +909,26 @@ public class ClientSession
     }
   }
 
+  @Override
   public ServerSession getSession() {
     return m_session;
   }
 
-  public String formatObjectName(Name name, long id) {
+  @Override
+  public String formatObjectName(final Name name, final long id) {
     try {
       String nameStr =
-          name.getKind() == NameManager.CONFERENCE_KIND && this.getLoggedInUserId() == id
-              ? this.getMessageFormatter().format("misc.mailboxtitle")
+          name.getKind() == NameManager.CONFERENCE_KIND && getLoggedInUserId() == id
+              ? getMessageFormatter().format("misc.mailboxtitle")
               : name.getName();
 
       // Omit user suffixes if requested
       //
       if (name.getKind() == NameManager.USER_KIND
-          && (this.getCachedUserInfo().getFlags1() & UserFlags.SHOW_SUFFIX) == 0)
+          && (getCachedUserInfo().getFlags1() & UserFlags.SHOW_SUFFIX) == 0) {
         nameStr = NameUtils.stripSuffix(nameStr);
-      StringBuffer sb = new StringBuffer(nameStr.length() + 10);
+      }
+      final StringBuilder sb = new StringBuilder(nameStr.length() + 10);
       if (nameStr.length() == 0) {
         // Protected conference, just show hidden name.
         //
@@ -1070,93 +938,110 @@ public class ClientSession
         // Normal conference. Show name and maybe object id.
         //
         sb.append(nameStr);
-        if ((this.getCachedUserInfo().getFlags1() & UserFlags.SHOW_OBJECT_IDS) != 0) {
+        if ((getCachedUserInfo().getFlags1() & UserFlags.SHOW_OBJECT_IDS) != 0) {
           sb.append(" <");
           sb.append(id);
           sb.append('>');
         }
       }
       return sb.toString();
-    } catch (UnexpectedException e) {
+    } catch (final UnexpectedException e) {
       throw new RuntimeException(e);
     }
   }
 
-  public String formatObjectName(NameAssociation object) {
+  @Override
+  public String formatObjectName(final NameAssociation object) {
     return object == null
         ? m_formatter.format("misc.nobody")
-        : this.formatObjectName(object.getName(), object.getId());
+        : formatObjectName(object.getName(), object.getId());
   }
 
-  public String smartFormatDate(Date date) throws UnexpectedException {
-    if (date == null) return m_formatter.format("date.never");
+  @Override
+  public String smartFormatDate(final Date date) throws UnexpectedException {
+    if (date == null) {
+      return m_formatter.format("date.never");
+    }
 
     // Check number of days from today
     //
-    Calendar then = Calendar.getInstance();
+    final Calendar then = Calendar.getInstance();
     then.setTime(date);
-    then.setTimeZone(this.getCachedUserInfo().getTimeZone());
+    then.setTimeZone(getCachedUserInfo().getTimeZone());
     String answer = m_formatter.format("timestamp.short", then.getTime());
 
     // Should we even try to be smart?
     //
-    if ((this.getCachedUserInfo().getFlags1() & UserFlags.ALWAYS_PRINT_FULL_DATE) != 0)
+    if ((getCachedUserInfo().getFlags1() & UserFlags.ALWAYS_PRINT_FULL_DATE) != 0) {
       return answer;
+    }
 
-    Calendar now = Calendar.getInstance(this.getCachedUserInfo().getTimeZone());
+    final Calendar now = Calendar.getInstance(getCachedUserInfo().getTimeZone());
     now.setTimeInMillis(System.currentTimeMillis());
 
     // Today or yesterday?
     //
     // Future date? Format the usual way
     //
-    if (now.before(then)) return answer;
-    int yearNow = now.get(Calendar.YEAR);
-    int yearThen = then.get(Calendar.YEAR);
-    int dayNow = now.get(Calendar.DAY_OF_YEAR);
-    int dayThen = then.get(Calendar.DAY_OF_YEAR);
-    if (yearNow == yearThen + 1) dayNow += then.getActualMaximum(Calendar.DAY_OF_YEAR);
-    else {
-      if (yearNow != yearThen) return answer;
+    if (now.before(then)) {
+      return answer;
     }
-    int dayDiff = dayNow - dayThen;
-    if (dayDiff == 0) answer = m_formatter.format("date.today");
-    else if (dayDiff == 1) answer = m_formatter.format("date.yesterday");
-    else if (dayDiff < 7) {
+    final int yearNow = now.get(Calendar.YEAR);
+    final int yearThen = then.get(Calendar.YEAR);
+    int dayNow = now.get(Calendar.DAY_OF_YEAR);
+    final int dayThen = then.get(Calendar.DAY_OF_YEAR);
+    if (yearNow == yearThen + 1) {
+      dayNow += then.getActualMaximum(Calendar.DAY_OF_YEAR);
+    } else {
+      if (yearNow != yearThen) {
+        return answer;
+      }
+    }
+    final int dayDiff = dayNow - dayThen;
+    if (dayDiff == 0) {
+      answer = m_formatter.format("date.today");
+    } else if (dayDiff == 1) {
+      answer = m_formatter.format("date.yesterday");
+    } else if (dayDiff < 7) {
       answer = m_dateSymbols.getWeekdays()[then.get(Calendar.DAY_OF_WEEK)];
       answer = answer.substring(0, 1).toUpperCase() + answer.substring(1);
-    } else return answer;
+    } else {
+      return answer;
+    }
     return answer + ", " + m_formatter.format("time.short", then.getTime());
   }
 
+  @Override
   public DisplayController getDisplayController() {
     try {
-      return (this.getCachedUserInfo().getFlags1() & UserFlags.ANSI_ATTRIBUTES) != 0
-          ? (DisplayController) new ANSIDisplayController(m_out)
-          : (DisplayController) new DummyDisplayController(m_out);
-    } catch (UnexpectedException e) {
+      return (getCachedUserInfo().getFlags1() & UserFlags.ANSI_ATTRIBUTES) != 0
+          ? new ANSIDisplayController(m_out)
+          : new DummyDisplayController(m_out);
+    } catch (final UnexpectedException e) {
       throw new RuntimeException(e);
     }
   }
 
+  @Override
   public TerminalController getTerminalController() {
     // TODO: Read from configuration
     //
-    return new ANSITerminalController(this.getOut());
+    return new ANSITerminalController(getOut());
   }
 
+  @Override
   public void printCurrentConference() throws ObjectNotFoundException, UnexpectedException {
     // Determine name of conference. Give a generic name
     // to mailboxes.
     //
-    this.getDisplayController().input();
-    ConferenceInfo conf = m_session.getCurrentConference();
-    long id = conf.getId();
-    String confName = this.formatObjectName(conf.getName(), id);
+    getDisplayController().input();
+    final ConferenceInfo conf = m_session.getCurrentConference();
+    final long id = conf.getId();
+    final String confName = formatObjectName(conf.getName(), id);
 
     // Calculate number of messages and print greeting
     //
-    int numMessages = m_session.countUnread(id);
+    final int numMessages = m_session.countUnread(id);
     m_out.println(
         m_formatter.format(
             numMessages == 1 ? "misc.one.unread.message" : "misc.enter.conference",
@@ -1166,16 +1051,18 @@ public class ClientSession
             }));
   }
 
+  @Override
   public MessageEditor getMessageEditor() throws UnexpectedException {
     try {
-      return (this.getCachedUserInfo().getFlags1() & UserFlags.USE_FULL_SCREEN_EDITOR) != 0
-          ? (MessageEditor) new FullscreenMessageEditor(this)
-          : (MessageEditor) new SimpleMessageEditor(this);
-    } catch (IOException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+      return (getCachedUserInfo().getFlags1() & UserFlags.USE_FULL_SCREEN_EDITOR) != 0
+          ? new FullscreenMessageEditor(this)
+          : new SimpleMessageEditor(this);
+    } catch (final IOException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
+  @Override
   public TerminalSettings getTerminalSettings() {
     return new TerminalSettings(
         m_windowHeight != -1 ? m_windowHeight : 24,
@@ -1183,95 +1070,115 @@ public class ClientSession
         "ANSI");
   }
 
-  public void setTerminalHeight(int height) {
+  @Override
+  public void setTerminalHeight(final int height) {
     m_windowHeight = height;
   }
 
-  public void setTerminalWidth(int width) {
+  @Override
+  public void setTerminalWidth(final int width) {
     m_windowWidth = width;
   }
 
-  public void setListenToTerminalSize(boolean value) {
+  @Override
+  public void setListenToTerminalSize(final boolean value) {
     m_ListenToTerminalSize = value;
   }
 
+  @Override
   public void printDebugInfo() {
     m_out.println(m_session.getDebugString());
   }
 
+  @Override
   public long getLoggedInUserId() {
     return m_userId;
   }
 
+  @Override
   public synchronized UserInfo getCachedUserInfo() throws UnexpectedException {
     try {
-      if (m_thisUserCache == null) m_thisUserCache = m_session.getUser(this.getLoggedInUserId());
+      if (m_thisUserCache == null) {
+        m_thisUserCache = m_session.getUser(getLoggedInUserId());
+      }
       return m_thisUserCache;
-    } catch (ObjectNotFoundException e) {
-      throw new UnexpectedException(this.getLoggedInUserId(), e);
+    } catch (final ObjectNotFoundException e) {
+      throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
+  @Override
   public synchronized void clearUserInfoCache() {
     m_thisUserCache = null;
   }
 
-  public boolean isFlagSet(int flagWord, long mask)
-      throws ObjectNotFoundException, UnexpectedException {
-    return (this.getCachedUserInfo().getFlags()[flagWord] & mask) == mask;
+  @Override
+  public boolean isFlagSet(final int flagWord, final long mask) throws UnexpectedException {
+    return (getCachedUserInfo().getFlags()[flagWord] & mask) == mask;
   }
 
-  public WordWrapper getWordWrapper(String content) {
-    return m_wordWrapperFactory.create(content, this.getTerminalSettings().getWidth());
+  @Override
+  public WordWrapper getWordWrapper(final String content) {
+    return m_wordWrapperFactory.create(content, getTerminalSettings().getWidth());
   }
 
-  public WordWrapper getWordWrapper(String content, int width) {
+  @Override
+  public WordWrapper getWordWrapper(final String content, final int width) {
     return m_wordWrapperFactory.create(content, width);
   }
 
-  public WordWrapper getWordWrapper(String content, int width, int offset) {
+  public WordWrapper getWordWrapper(final String content, final int width, final int offset) {
     return m_wordWrapperFactory.create(content, width, offset);
   }
 
-  public String[] getFlagLabels(String flagTable) {
-    return this.loadFlagTable(flagTable);
+  @Override
+  public String[] getFlagLabels(final String flagTable) {
+    return loadFlagTable(flagTable);
   }
 
-  public void checkName(String name)
+  @Override
+  public void checkName(final String name)
       throws DuplicateNameException, InvalidNameException, UnexpectedException {
     // Check that name is lexigraphically correct
     //
-    if (!NameUtils.isValidName(name)) throw new InvalidNameException(name);
+    if (!NameUtils.isValidName(name)) {
+      throw new InvalidNameException(name);
+    }
 
     // Check for conflict with mailbox name
     //
     if (NameUtils.normalizeName(name)
-        .equals(NameUtils.normalizeName(m_formatter.format("misc.mailboxtitle"))))
+        .equals(NameUtils.normalizeName(m_formatter.format("misc.mailboxtitle")))) {
       throw new DuplicateNameException(name);
+    }
 
     // Check for conflict with existing name, ignoring suffixes
     //
-    String normalized = NameUtils.stripSuffix(NameUtils.normalizeName(name));
+    final String normalized = NameUtils.stripSuffix(NameUtils.normalizeName(name));
 
     // Nothing left after normalizing name? That's not legal!
     //
-    if (normalized.length() == 0) throw new InvalidNameException(name);
-    NameAssociation names[] = m_session.getAssociationsForPattern(normalized);
-    int top = names.length;
-    for (int idx = 0; idx < top; ++idx) {
-      String each = names[idx].getName().toString();
-      if (NameUtils.stripSuffix(NameUtils.normalizeName(each)).equals(normalized))
+    if (normalized.length() == 0) {
+      throw new InvalidNameException(name);
+    }
+    final NameAssociation[] names = m_session.getAssociationsForPattern(normalized);
+    for (final NameAssociation nameAssociation : names) {
+      final String each = nameAssociation.getName().toString();
+      if (NameUtils.stripSuffix(NameUtils.normalizeName(each)).equals(normalized)) {
         throw new DuplicateNameException(name);
+      }
     }
   }
 
   // Implementation of EventTarget
   //
-  public void onEvent(Event e) {
+  @Override
+  public void onEvent(final Event e) {
     System.out.println("Unknown Event: " + e.toString());
   }
 
-  public void onEvent(ChatMessageEvent event) {
+  @Override
+  public void onEvent(final ChatMessageEvent event) {
     // Put it on a queue until there's a good time to display it!
     //
     synchronized (m_displayMessageQueue) {
@@ -1279,7 +1186,8 @@ public class ClientSession
     }
   }
 
-  public void onEvent(BroadcastMessageEvent event) {
+  @Override
+  public void onEvent(final BroadcastMessageEvent event) {
     // Put it on a queue until there's a good time to display it!
     //
     synchronized (m_displayMessageQueue) {
@@ -1287,7 +1195,8 @@ public class ClientSession
     }
   }
 
-  public void onEvent(BroadcastAnonymousMessageEvent event) {
+  @Override
+  public void onEvent(final BroadcastAnonymousMessageEvent event) {
     // Put it on a queue until there's a good time to display it!
     //
     synchronized (m_displayMessageQueue) {
@@ -1295,7 +1204,8 @@ public class ClientSession
     }
   }
 
-  public void onEvent(ChatAnonymousMessageEvent event) {
+  @Override
+  public void onEvent(final ChatAnonymousMessageEvent event) {
     // Put it on a queue until there's a good time to display it!
     //
     synchronized (m_displayMessageQueue) {
@@ -1303,7 +1213,8 @@ public class ClientSession
     }
   }
 
-  public void onEvent(UserAttendanceEvent event) {
+  @Override
+  public void onEvent(final UserAttendanceEvent event) {
     // Put it on a queue until there's a good time to display it!
     //
     synchronized (m_displayMessageQueue) {
@@ -1311,63 +1222,71 @@ public class ClientSession
     }
   }
 
-  public synchronized void onEvent(ReloadUserProfileEvent event) {
+  @Override
+  public synchronized void onEvent(final ReloadUserProfileEvent event) {
     // Invalidate user info cache
     //
     m_thisUserCache = null;
   }
 
-  public void onEvent(NewMessageEvent event) {
+  @Override
+  public void onEvent(final NewMessageEvent event) {
     // Handled in command loop
   }
 
-  public void onEvent(MessageDeletedEvent event) {
+  @Override
+  public void onEvent(final MessageDeletedEvent event) {
     // Handled in command loop
   }
 
-  public void onEvent(TicketDeliveredEvent event) {
+  @Override
+  public void onEvent(final TicketDeliveredEvent event) {
     // TODO: Implement
   }
 
-  public void onEvent(DetachRequestEvent event) {
-    this.detach();
+  public void onEvent(final DetachRequestEvent event) {
+    detach();
   }
 
   // Implementation of TerminalSizeListener
   //
-  public void terminalSizeChanged(int width, int height) {
+  @Override
+  public void terminalSizeChanged(final int width, final int height) {
     if (m_ListenToTerminalSize) {
       m_windowWidth = width;
       m_windowHeight = height;
     }
   }
 
-  public void environmentChanged(String name, String value) {
-    if (!"TICKET".equals(name)) return;
-    Logger.debug(this, "Received ticket");
-    m_in.handleEvent(new TicketDeliveredEvent(this.getLoggedInUserId(), value));
+  @Override
+  public void environmentChanged(final String name, final String value) {
+    if (!"TICKET".equals(name)) {
+      return;
+    }
+    LOG.debug("Received ticket");
+    m_in.handleEvent(new TicketDeliveredEvent(getLoggedInUserId(), value));
   }
 
   protected String waitForTicket() throws InterruptedException, IOException {
     // Do we already have a ticket?
     //
-    if (m_ticket != null) return m_ticket;
+    if (m_ticket != null) {
+      return m_ticket;
+    }
     for (; ; ) {
       try {
         m_in.readLine("", "", 0, LineEditor.FLAG_STOP_ON_EVENT);
-      } catch (EventDeliveredException e) {
-        Logger.debug(this, "Got event while waiting for ticket: " + e.getClass().getName());
-        Event ev = e.getEvent();
-        if (ev instanceof TicketDeliveredEvent) return ((TicketDeliveredEvent) ev).getTicket();
-      } catch (LineEditingDoneException e) {
+      } catch (final EventDeliveredException e) {
+        LOG.debug("Got event while waiting for ticket: " + e.getClass().getName());
+        final Event ev = e.getEvent();
+        if (ev instanceof TicketDeliveredEvent) {
+          return ((TicketDeliveredEvent) ev).getTicket();
+        }
+      } catch (final LineEditingDoneException e) {
         throw new RuntimeException("This should not happen!", e);
-      } catch (LineUnderflowException e) {
+      } catch (final LineUnderflowException | LineOverflowException | StopCharException e) {
         // Ignore
-      } catch (LineOverflowException e) {
-        // Ignore
-      } catch (StopCharException e) {
-        // Ignore
-      } catch (OperationInterruptedException e) {
+      } catch (final OperationInterruptedException e) {
         throw new InterruptedException();
       }
     }
@@ -1377,29 +1296,31 @@ public class ClientSession
 
     try {
       m_parser = Parser.load("commands.xml", this);
-    } catch (IOException e) {
+    } catch (final IOException e) {
       throw new UnexpectedException(-1, e);
     }
   }
 
-  public String[] loadFlagTable(String prefix) {
-    String[] flagLabels = new String[UserFlags.NUM_FLAGS];
+  public String[] loadFlagTable(final String prefix) {
+    final String[] flagLabels = new String[UserFlags.NUM_FLAGS];
     for (int idx = 0; idx < UserFlags.NUM_FLAGS; ++idx) {
       // Calculate flag word and flag bit index
       //
-      int flagWord = 1 + (idx / 64);
-      long flagBit = (long) 1 << (long) (idx % 64);
-      String hex = Long.toHexString(flagBit);
+      final int flagWord = 1 + (idx / 64);
+      final long flagBit = (long) 1 << (long) (idx % 64);
+      final String hex = Long.toHexString(flagBit);
 
       // Build message key
       //
-      StringBuffer buf = new StringBuffer();
+      final StringBuilder buf = new StringBuilder();
       buf.append(prefix);
       buf.append('.');
       buf.append(flagWord);
       buf.append('.');
-      int top = 8 - hex.length();
-      for (int idx2 = 0; idx2 < top; ++idx2) buf.append('0');
+      final int top = 8 - hex.length();
+      for (int idx2 = 0; idx2 < top; ++idx2) {
+        buf.append('0');
+      }
       buf.append(hex);
 
       // Get flag label
@@ -1418,11 +1339,12 @@ public class ClientSession
     return m_parser.getCommandList();
   }
 
+  @Override
   public Parser getParser() {
     return m_parser;
   }
 
-  public void setTicket(String ticket) {
+  public void setTicket(final String ticket) {
     m_ticket = ticket;
   }
 
@@ -1433,5 +1355,169 @@ public class ClientSession
 
   public void logout() {
     m_loggedIn = false;
+  }
+
+  private class HeartbeatSender extends Thread implements KeystrokeListener {
+    private boolean m_idle = false;
+
+    @Override
+    public void keystroke(final char ch) {
+      // Are we idle? Send heartbeat immediately!
+      //
+      if (m_idle) {
+        synchronized (this) {
+          notify();
+        }
+        m_idle = false;
+      }
+    }
+
+    @Override
+    public void run() {
+
+      for (; ; ) {
+        // Sleep for 30 seconds
+        //
+        try {
+          synchronized (this) {
+            wait(30000);
+          }
+        } catch (final InterruptedException e) {
+          break;
+        }
+
+        // Any activity the last 30 seconds? Send hearbeat!
+        //
+        if (System.currentTimeMillis() - m_in.getLastKeystrokeTime() < 30000) {
+          getSession().getHeartbeatListener().heartbeat();
+        } else {
+          m_idle = true;
+        }
+      }
+    }
+  }
+
+  private class EventPrinter implements EventTarget {
+    private final Context context;
+
+    public EventPrinter(final Context context) {
+      this.context = context;
+    }
+
+    private void printWrapped(final String message, final int offset) {
+      final WordWrapper ww = getWordWrapper(message, getTerminalSettings().getWidth(), offset);
+      String line;
+      while ((line = ww.nextLine()) != null) {
+        m_out.println(line);
+      }
+    }
+
+    @Override
+    public void onEvent(final Event event) {
+      // Unknown event. Not much we can do.
+    }
+
+    @Override
+    public void onEvent(final ChatMessageEvent event) {
+      beepMaybe(UserFlags.BEEP_ON_CHAT);
+      final String header =
+          m_formatter.format(
+              "event.chat",
+              new Object[] {formatObjectName(event.getUserName(), event.getOriginatingUser())});
+      getDisplayController().chatMessageHeader();
+      m_out.print(header);
+      getDisplayController().chatMessageBody();
+      printWrapped(event.getMessage(), header.length());
+      m_out.println();
+    }
+
+    @Override
+    public void onEvent(final BroadcastMessageEvent event) {
+      try {
+        final boolean more =
+            (context.getCachedUserInfo().getFlags1() & UserFlags.MORE_PROMPT_IN_BROADCAST) != 0;
+        context.getIn().setPageBreak(more);
+        beepMaybe(UserFlags.BEEP_ON_BROADCAST);
+        final String name = formatObjectName(event.getUserName(), event.getOriginatingUser());
+        final String header =
+            event.getKind() == MessageLogKinds.BROADCAST
+                ? m_formatter.format("event.broadcast.default", new Object[] {name})
+                : name + ' ';
+        getDisplayController().broadcastMessageHeader();
+        m_out.print(header);
+        if (event.getKind() == MessageLogKinds.BROADCAST) {
+          getDisplayController().broadcastMessageBody();
+        }
+        printWrapped(event.getMessage(), header.length());
+        m_out.println();
+        context.getIn().setPageBreak(true);
+      } catch (final UnexpectedException e) {
+        LOG.error("Error in broadcast message handler", e);
+      }
+    }
+
+    @Override
+    public void onEvent(final ChatAnonymousMessageEvent event) {
+      beepMaybe(UserFlags.BEEP_ON_CHAT);
+      final String header = m_formatter.format("event.chat.anonymous");
+      getDisplayController().chatMessageHeader();
+      m_out.print(header);
+      getDisplayController().chatMessageBody();
+      printWrapped(event.getMessage(), header.length());
+      m_out.println();
+    }
+
+    @Override
+    public void onEvent(final BroadcastAnonymousMessageEvent event) {
+      beepMaybe(UserFlags.BEEP_ON_BROADCAST);
+      final String header = m_formatter.format("event.broadcast.anonymous");
+      getDisplayController().broadcastMessageHeader();
+      m_out.print(header);
+      getDisplayController().broadcastMessageBody();
+      printWrapped(event.getMessage(), header.length());
+      m_out.println();
+    }
+
+    @Override
+    public void onEvent(final NewMessageEvent event) {
+      // This event should not be handled here
+    }
+
+    @Override
+    public void onEvent(final UserAttendanceEvent event) {
+      getDisplayController().broadcastMessageHeader();
+      beepMaybe(UserFlags.BEEP_ON_ATTENDANCE);
+      m_out.println(
+          m_formatter.format(
+              "event.attendance." + event.getType(),
+              new Object[] {
+                context.formatObjectName(event.getUserName(), event.getOriginatingUser())
+              }));
+      m_out.println();
+    }
+
+    @Override
+    public void onEvent(final ReloadUserProfileEvent event) {
+      // This event should not be handled here
+    }
+
+    @Override
+    public void onEvent(final MessageDeletedEvent event) {
+      // This event should not be handled here
+    }
+
+    protected void beepMaybe(final long flag) {
+      try {
+        // Beep if user wants it
+        //
+        if ((getCachedUserInfo().getFlags1() & flag) != 0) {
+          m_out.print('\u0007');
+        }
+      } catch (final UnexpectedException e) {
+        // Should NOT happen!
+        //
+        throw new RuntimeException(e);
+      }
+    }
   }
 }

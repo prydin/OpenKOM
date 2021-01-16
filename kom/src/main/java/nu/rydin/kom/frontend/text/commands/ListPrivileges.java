@@ -17,7 +17,7 @@ import nu.rydin.kom.structs.NameAssociation;
 import nu.rydin.kom.structs.UserInfo;
 import nu.rydin.kom.utils.FlagUtils;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class ListPrivileges extends AbstractCommand {
   public ListPrivileges(Context context, String fullName, long permissions) {
     super(fullName, new CommandLineParameter[] {new UserParameter(false)}, permissions);

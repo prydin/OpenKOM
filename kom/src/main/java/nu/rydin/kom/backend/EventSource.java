@@ -8,7 +8,7 @@ package nu.rydin.kom.backend;
 
 import nu.rydin.kom.events.Event;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public interface EventSource {
   /**
    * Polls for an event.

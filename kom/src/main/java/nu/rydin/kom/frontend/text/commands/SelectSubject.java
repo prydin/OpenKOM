@@ -13,7 +13,7 @@ import nu.rydin.kom.exceptions.UnexpectedException;
 import nu.rydin.kom.frontend.text.AbstractCommand;
 import nu.rydin.kom.frontend.text.Context;
 
-/** @author <a href=mailto:jepson@xyzzy.se>Jepson</a> */
+/** @author Jepson */
 public class SelectSubject extends AbstractCommand {
   public SelectSubject(Context context, String fullName, long permissions) {
     super(fullName, AbstractCommand.NO_PARAMETERS, permissions);

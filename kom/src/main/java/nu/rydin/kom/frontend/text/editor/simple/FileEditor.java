@@ -12,7 +12,7 @@ import nu.rydin.kom.exceptions.UnexpectedException;
 import nu.rydin.kom.frontend.text.Context;
 import nu.rydin.kom.structs.UnstoredMessage;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin </a> */
+/** @author Pontus Rydin  */
 public class FileEditor extends AbstractEditor {
 
   public FileEditor(Context context) throws IOException, UnexpectedException {

@@ -10,7 +10,7 @@ import java.io.Serializable;
 import nu.rydin.kom.backend.data.NameManager;
 import nu.rydin.kom.constants.Visibilities;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class Name implements Serializable {
   static final long serialVersionUID = 2005;
 

@@ -17,7 +17,7 @@ import nu.rydin.kom.frontend.text.parser.CommandLineParameter;
 import nu.rydin.kom.frontend.text.parser.StringParameter;
 import nu.rydin.kom.i18n.MessageFormatter;
 
-/** @author <a href=mailto:jepson@xyzzy.se>Jepson</a> */
+/** @author Jepson */
 public class DeleteAlias extends AbstractCommand {
   public DeleteAlias(Context context, String fullName, long permissions) {
     super(

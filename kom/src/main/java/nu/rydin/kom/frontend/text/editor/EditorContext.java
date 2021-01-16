@@ -30,7 +30,7 @@ import nu.rydin.kom.structs.Name;
 import nu.rydin.kom.structs.NameAssociation;
 import nu.rydin.kom.structs.UserInfo;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class EditorContext implements Context {
   private final Context m_underlying;
 

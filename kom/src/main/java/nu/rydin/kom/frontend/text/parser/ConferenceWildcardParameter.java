@@ -12,7 +12,7 @@ import nu.rydin.kom.exceptions.KOMException;
 import nu.rydin.kom.frontend.text.Context;
 import nu.rydin.kom.structs.NameAssociation;
 
-/** @author <a href=mailto:jepson@xyzzy.se>Jepson</a> */
+/** @author Jepson */
 public class ConferenceWildcardParameter extends NamedObjectParameter {
   public static final NameAssociation ALL_CONFS =
       new NameAssociation(-1, "*", NameManager.CONFERENCE_KIND);

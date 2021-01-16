@@ -7,7 +7,7 @@ package nu.rydin.kom.exceptions;
 
 import nu.rydin.kom.frontend.text.Context;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public abstract class KOMException extends Exception {
   static final long serialVersionUID = 2005;
 

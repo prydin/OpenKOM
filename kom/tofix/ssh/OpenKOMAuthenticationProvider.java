@@ -28,9 +28,9 @@ import com.sshtools.j2ssh.SshThread;
  * a ticket is generated and stored. The client session can retrieve this ticket
  * at a later point as proof of successful authentication.
  * 
- * @author Henrik Schröder
- * @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a>
- * @author <a href=mailto:jepson@xyzzy.se>Jepson</a>
+ * @author Henrik Schrï¿½der
+ * @author Pontus Rydin
+ * @author Jepson
  */
 public class OpenKOMAuthenticationProvider extends NativeAuthenticationProvider
 {

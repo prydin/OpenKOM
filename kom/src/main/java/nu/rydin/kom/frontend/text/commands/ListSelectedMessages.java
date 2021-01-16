@@ -14,7 +14,7 @@ import nu.rydin.kom.frontend.text.Context;
 import nu.rydin.kom.frontend.text.KOMWriter;
 import nu.rydin.kom.structs.MessageSearchResult;
 
-/** @author <a href=mailto:magnus.neck@abc.se>Magnus Neck</a> */
+/** @author Magnus Neck */
 public class ListSelectedMessages extends AbstractCommand {
 
   public ListSelectedMessages(Context context, String fullName, long permissions) {

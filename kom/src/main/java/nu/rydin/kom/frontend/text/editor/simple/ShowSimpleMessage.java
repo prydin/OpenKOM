@@ -19,7 +19,7 @@ import nu.rydin.kom.structs.MessageLocator;
 import nu.rydin.kom.utils.PrintUtils;
 
 /**
- * @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a>
+ * @author Pontus Rydin
  * @author Henrik Schr�der
  */
 public class ShowSimpleMessage extends AbstractCommand {

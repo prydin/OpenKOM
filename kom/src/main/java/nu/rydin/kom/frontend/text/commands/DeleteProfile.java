@@ -13,7 +13,7 @@ import nu.rydin.kom.frontend.text.Context;
 import nu.rydin.kom.frontend.text.parser.CommandLineParameter;
 import nu.rydin.kom.frontend.text.parser.RawParameter;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class DeleteProfile extends AbstractCommand {
   public DeleteProfile(Context context, String fullname, long permissions) {
     super(

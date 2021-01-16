@@ -17,7 +17,7 @@ import nu.rydin.kom.utils.PrintUtils;
 
 /**
  * @author Henrik Schr�der
- * @author <a href=mailto:magnus.neck@abc.se>Magnus Neck</a>
+ * @author Magnus Neck
  */
 public class GlobalMessageSearchResultPrinter implements MessageSearchResultPrinter {
 

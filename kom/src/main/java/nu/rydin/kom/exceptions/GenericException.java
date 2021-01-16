@@ -8,7 +8,7 @@ package nu.rydin.kom.exceptions;
 
 import nu.rydin.kom.frontend.text.Context;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class GenericException extends UserException {
   static final long serialVersionUID = 2005;
 

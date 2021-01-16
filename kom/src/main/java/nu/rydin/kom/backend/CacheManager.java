@@ -6,19 +6,19 @@
  */
 package nu.rydin.kom.backend;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class CacheManager {
-  private static CacheManager s_instance = new CacheManager();
+  private static final CacheManager s_instance = new CacheManager();
 
-  private KOMCache m_userCache = new KOMCache(1000); // TODO: Read from config
+  private final KOMCache m_userCache = new KOMCache(1000); // TODO: Read from config
 
-  private KOMCache m_conferenceCache = new KOMCache(5000); // TODO: Read from config
+  private final KOMCache m_conferenceCache = new KOMCache(5000); // TODO: Read from config
 
-  private KOMCache m_messageCache = new KOMCache(100); // TODO: Read from config
+  private final KOMCache m_messageCache = new KOMCache(100); // TODO: Read from config
 
-  private KOMCache m_nameCache = new KOMCache(1000); // TODO: Read from config
+  private final KOMCache m_nameCache = new KOMCache(1000); // TODO: Read from config
 
-  private KOMCache m_permissionCache = new KOMCache(1000); // TODO: Read from config
+  private final KOMCache m_permissionCache = new KOMCache(1000); // TODO: Read from config
 
   public static CacheManager instance() {
     return s_instance;

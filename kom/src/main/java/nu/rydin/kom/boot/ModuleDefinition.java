@@ -17,7 +17,7 @@ import nu.rydin.kom.modules.Module;
 /**
  * Represents a module definition.
  *
- * @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a>
+ * @author Pontus Rydin
  */
 class ModuleDefinition {
   /** The name of the module */
@@ -40,7 +40,7 @@ class ModuleDefinition {
    * @param parameters Module specific parameters
    */
   public ModuleDefinition(
-      String name, String className, List<String> classPath, Map<String, String> parameters) {
+          final String name, final String className, final List<String> classPath, final Map<String, String> parameters) {
     this.name = name;
     this.className = className;
     this.classPath = classPath;
@@ -72,17 +72,19 @@ class ModuleDefinition {
           MalformedURLException {
     // Build a ClassLoader based on specified classpath (if any)
     //
-    ClassLoader loader;
-    if (this.classPath != null) {
-      int top = classPath.size();
-      URL[] urls = new URL[top];
+    final ClassLoader loader;
+    if (classPath != null) {
+      final int top = classPath.size();
+      final URL[] urls = new URL[top];
       int idx = 0;
-      for (String classPathEntry : classPath) {
-        urls[idx++] = new File(classPathEntry).toURL();
+      for (final String classPathEntry : classPath) {
+        urls[idx++] = new File(classPathEntry).toURI().toURL();
       }
-      loader = new URLClassLoader(urls, this.getClass().getClassLoader());
-    } else loader = this.getClass().getClassLoader();
+      loader = new URLClassLoader(urls, getClass().getClassLoader());
+    } else {
+      loader = getClass().getClassLoader();
+    }
     Thread.currentThread().setContextClassLoader(loader);
-    return (Module) loader.loadClass(this.className).newInstance();
+    return (Module) loader.loadClass(className).newInstance();
   }
 }

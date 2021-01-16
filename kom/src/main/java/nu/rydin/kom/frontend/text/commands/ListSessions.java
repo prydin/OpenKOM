@@ -17,7 +17,7 @@ import nu.rydin.kom.utils.HeaderPrinter;
 import nu.rydin.kom.utils.PrintUtils;
 import nu.rydin.kom.utils.StringUtils;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class ListSessions extends AbstractCommand {
 
   public ListSessions(Context context, String fullName, long permissions) {

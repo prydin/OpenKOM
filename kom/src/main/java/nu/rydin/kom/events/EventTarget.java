@@ -7,9 +7,9 @@
 package nu.rydin.kom.events;
 
 /**
- * @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a>
- * @author <a href=mailto:jepson@xyzzy.se>Jepson</a>
- * @author <a href=mailto:guru@slideware.com>fuffenz</a>
+ * @author Pontus Rydin
+ * @author Jepson
+ * @author fuffenz
  */
 public interface EventTarget {
   public void onEvent(Event event);

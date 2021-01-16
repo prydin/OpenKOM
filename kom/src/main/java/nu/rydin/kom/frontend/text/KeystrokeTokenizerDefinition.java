@@ -11,7 +11,7 @@ import java.util.Map;
 import java.util.Map.Entry;
 import nu.rydin.kom.exceptions.AmbiguousPatternException;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class KeystrokeTokenizerDefinition implements Cloneable {
   public static final int NON_TERMINAL = 1;
   public static final int LITERAL = 2;

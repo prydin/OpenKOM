@@ -19,7 +19,7 @@ import nu.rydin.kom.i18n.MessageFormatter;
 import nu.rydin.kom.structs.MessageOccurrence;
 import nu.rydin.kom.structs.NameAssociation;
 
-/** @author <a href=mailto:jepson@xyzzy.se>Jepson</a> */
+/** @author Jepson */
 public class MoveMessage extends AbstractCommand {
   public MoveMessage(Context context, String fullName, long permissions) {
     super(fullName, new CommandLineParameter[] {new ConferenceParameter(true)}, permissions);

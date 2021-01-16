@@ -11,7 +11,7 @@ import nu.rydin.kom.events.Event;
 /**
  * Event carrying information about a typed character.
  *
- * @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a>
+ * @author Pontus Rydin
  */
 public class KeystrokeEvent extends Event {
   private char m_ch;

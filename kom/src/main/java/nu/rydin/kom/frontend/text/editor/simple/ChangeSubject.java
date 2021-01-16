@@ -15,7 +15,7 @@ import nu.rydin.kom.frontend.text.editor.EditorContext;
 import nu.rydin.kom.frontend.text.parser.CommandLineParameter;
 import nu.rydin.kom.frontend.text.parser.RawParameter;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class ChangeSubject extends AbstractCommand {
   private static class DefaultStrategy
       implements nu.rydin.kom.frontend.text.parser.DefaultStrategy {

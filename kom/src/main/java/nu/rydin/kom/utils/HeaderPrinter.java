@@ -9,7 +9,7 @@ package nu.rydin.kom.utils;
 import java.io.PrintWriter;
 import java.util.ArrayList;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class HeaderPrinter {
   private final ArrayList<Entry> m_headers = new ArrayList<Entry>();
 

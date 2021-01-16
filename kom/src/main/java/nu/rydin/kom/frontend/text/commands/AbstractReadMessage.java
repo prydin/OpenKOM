@@ -15,7 +15,7 @@ import nu.rydin.kom.frontend.text.parser.CommandLineParameter;
 import nu.rydin.kom.structs.Envelope;
 import nu.rydin.kom.structs.MessageLocator;
 
-/** @author <a href=mailto:magnus.neck@abc.se>Magnus Neck</a> */
+/** @author Magnus Neck */
 public abstract class AbstractReadMessage extends AbstractCommand {
   private final String m_noMessageErrorMessageResource;
 

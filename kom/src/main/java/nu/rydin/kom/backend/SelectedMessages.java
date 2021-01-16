@@ -17,11 +17,11 @@ import nu.rydin.kom.structs.MessageSearchResult;
 /**
  * This class handles selection of texts in a MessageSearchResult array.
  *
- * @author <a href=mailto:magnus.neck@abc.se>Magnus Neck</a>
+ * @author Magnus Neck
  */
 public class SelectedMessages {
 
-  private static int INITIAL_MESSSAGE_INDEX = -1;
+  private static final int INITIAL_MESSSAGE_INDEX = -1;
 
   private MessageSearchResult[] m_messages;
   private int m_nextMessageIndex = INITIAL_MESSSAGE_INDEX;
@@ -35,15 +35,11 @@ public class SelectedMessages {
     m_nextMessageIndex = INITIAL_MESSSAGE_INDEX;
   }
 
-  public void setMessages(MessageSearchResult[] msr) {
-    this.setMessages(msr, false);
-  }
-
-  public void setMessages(MessageSearchResult[] msr, boolean reverse) {
+  public void setMessages(final MessageSearchResult[] msr, final boolean reverse) {
     m_nextMessageIndex = 0;
     if (reverse) {
       for (int left = 0, right = msr.length - 1; left < right; left++, right--) {
-        MessageSearchResult tmp = msr[left];
+        final MessageSearchResult tmp = msr[left];
         msr[left] = msr[right];
         msr[right] = tmp;
       }
@@ -53,6 +49,10 @@ public class SelectedMessages {
 
   public MessageSearchResult[] getMessages() {
     return m_messages;
+  }
+
+  public void setMessages(final MessageSearchResult[] msr) {
+    setMessages(msr, false);
   }
 
   public MessageLocator getNextMessage() {
@@ -79,7 +79,7 @@ public class SelectedMessages {
     return m_messages.length - m_nextMessageIndex;
   }
 
-  public MessageSearchResultPrinter getMessageSearchResultPrinter(Context context)
+  public MessageSearchResultPrinter getMessageSearchResultPrinter(final Context context)
       throws KOMException {
     if (!hasUnreadMessages()) {
       throw new InternalException("No messages selected");

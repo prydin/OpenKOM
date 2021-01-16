@@ -18,7 +18,7 @@ import nu.rydin.kom.frontend.text.Context;
 import nu.rydin.kom.frontend.text.LineEditor;
 import nu.rydin.kom.i18n.MessageFormatter;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class CreateUser extends AbstractCommand {
   public CreateUser(Context context, String fullName, long permissions) {
     super(fullName, AbstractCommand.NO_PARAMETERS, permissions);

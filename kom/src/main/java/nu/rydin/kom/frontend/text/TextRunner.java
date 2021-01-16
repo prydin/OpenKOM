@@ -8,7 +8,7 @@ package nu.rydin.kom.frontend.text;
 
 import java.util.HashMap;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class TextRunner {
   public static void main(String[] args) {
     try {

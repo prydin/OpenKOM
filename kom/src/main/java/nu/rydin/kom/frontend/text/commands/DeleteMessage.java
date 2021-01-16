@@ -14,7 +14,7 @@ import nu.rydin.kom.frontend.text.parser.CommandLineParameter;
 import nu.rydin.kom.frontend.text.parser.LocalTextNumberParameter;
 import nu.rydin.kom.i18n.MessageFormatter;
 
-/** @author <a href=mailto:jepson@xyzzy.se>Jepson </a> */
+/** @author Jepson  */
 public class DeleteMessage extends AbstractCommand {
   public DeleteMessage(Context context, String fullName, long permissions) {
     super(fullName, new CommandLineParameter[] {new LocalTextNumberParameter(true)}, permissions);

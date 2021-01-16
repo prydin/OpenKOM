@@ -11,7 +11,7 @@ import nu.rydin.kom.frontend.text.Context;
 import nu.rydin.kom.frontend.text.parser.CommandLineParameter;
 import nu.rydin.kom.frontend.text.parser.RawParameter;
 
-/** @author <a href=mailto:magnus.neck@abc.se>Magnus Neck</a> */
+/** @author Magnus Neck */
 public class SelectAndSearchGlobalMessage extends AbstractSelect {
 
   public SelectAndSearchGlobalMessage(Context context, String fullName, long permissions) {

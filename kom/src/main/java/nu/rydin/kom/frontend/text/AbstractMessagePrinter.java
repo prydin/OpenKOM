@@ -18,8 +18,8 @@ import nu.rydin.kom.structs.MessageOccurrence;
 import nu.rydin.kom.utils.PrintUtils;
 
 /**
- * @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a>
- * @author <a href=mailto:jepson@xyzzy.se>Jepson</a>
+ * @author Pontus Rydin
+ * @author Jepson
  */
 public abstract class AbstractMessagePrinter implements MessagePrinter {
 

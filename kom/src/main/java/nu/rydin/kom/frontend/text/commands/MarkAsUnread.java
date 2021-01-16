@@ -16,7 +16,7 @@ import nu.rydin.kom.frontend.text.parser.CommandLineParameter;
 import nu.rydin.kom.frontend.text.parser.TextNumberParameter;
 import nu.rydin.kom.structs.MessageLocator;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class MarkAsUnread extends AbstractCommand {
   public MarkAsUnread(Context context, String fullName, long permissions) {
     super(fullName, new CommandLineParameter[] {new TextNumberParameter(false)}, permissions);

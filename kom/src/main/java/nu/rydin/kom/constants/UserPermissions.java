@@ -9,7 +9,7 @@ package nu.rydin.kom.constants;
 /**
  * Constants for user permissions.
  *
- * @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a>
+ * @author Pontus Rydin
  */
 public class UserPermissions {
   /** Permission to create new conferences */

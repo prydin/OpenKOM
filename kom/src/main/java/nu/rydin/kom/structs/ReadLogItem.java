@@ -9,7 +9,7 @@ package nu.rydin.kom.structs;
 /**
  * Used for keeping a linked list of messages being read.
  *
- * @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a>
+ * @author Pontus Rydin
  */
 public class ReadLogItem {
   private final ReadLogItem previous;

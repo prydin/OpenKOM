@@ -6,7 +6,7 @@
  */
 package nu.rydin.kom.frontend.text;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public interface KeystrokeListener {
   public void keystroke(char ch);
 }

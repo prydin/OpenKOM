@@ -9,7 +9,7 @@ package nu.rydin.kom.utils;
 import java.io.PrintWriter;
 import nu.rydin.kom.i18n.MessageFormatter;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class FlagUtils {
   public static void printFlags(
           final PrintWriter out, final MessageFormatter formatter, final String[] flagLabels, final long[] flags) {

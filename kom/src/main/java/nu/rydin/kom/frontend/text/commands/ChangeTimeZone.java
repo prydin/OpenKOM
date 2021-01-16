@@ -16,7 +16,7 @@ import nu.rydin.kom.frontend.text.parser.CommandLineParameter;
 import nu.rydin.kom.frontend.text.parser.TimeZoneParameter;
 import nu.rydin.kom.i18n.MessageFormatter;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class ChangeTimeZone extends AbstractCommand {
   public ChangeTimeZone(Context context, String fullName, long permissions) {
     super(fullName, new CommandLineParameter[] {new TimeZoneParameter(true)}, permissions);

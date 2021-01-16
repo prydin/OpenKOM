@@ -11,7 +11,7 @@ import java.util.Iterator;
 import nu.rydin.kom.utils.CompoundHashMap;
 
 /**
- * @author <a href=mailto:jepson@xyzzy.se>Jepson</a>
+ * @author Jepson
  */
 
 public class Emulator

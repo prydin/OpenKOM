@@ -30,11 +30,14 @@ import nu.rydin.kom.i18n.MessageFormatter;
 import nu.rydin.kom.structs.MessageLocator;
 import nu.rydin.kom.structs.Name;
 import nu.rydin.kom.structs.UnstoredMessage;
-import nu.rydin.kom.utils.Logger;
 import nu.rydin.kom.utils.PrintUtils;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /** @author Pontus Rydin */
 public class FullscreenMessageEditor extends FullscreenEditor implements MessageEditor {
+  private static final Logger LOG = LogManager.getLogger(FullscreenMessageEditor.class);
+
   private static final int NUM_HEADER_ROWS = 3;
 
   private String replyHeader;
@@ -43,26 +46,28 @@ public class FullscreenMessageEditor extends FullscreenEditor implements Message
 
   private int headerRows;
 
-  public FullscreenMessageEditor(Context context) throws IOException, UnexpectedException {
+  public FullscreenMessageEditor(final Context context) throws IOException, UnexpectedException {
     super(context);
   }
 
+  @Override
   public UnstoredMessage edit() throws KOMException, InterruptedException {
-    return this.edit(
-        MessageLocator.NO_MESSAGE, -1, Name.emptyName(), -1, Name.emptyName(), "", true);
+    return edit(MessageLocator.NO_MESSAGE, -1, Name.emptyName(), -1, Name.emptyName(), "", true);
   }
 
-  public UnstoredMessage edit(boolean askForSubject) throws KOMException, InterruptedException {
-    return this.edit(
+  @Override
+  public UnstoredMessage edit(final boolean askForSubject)
+      throws KOMException, InterruptedException {
+    return edit(
         MessageLocator.NO_MESSAGE, -1, Name.emptyName(), -1, Name.emptyName(), "", askForSubject);
   }
 
   protected void printHeader() {
-    TerminalController tc = this.getTerminalController();
-    int w = this.getTerminalSettings().getWidth();
-    DisplayController dc = this.getDisplayController();
-    PrintWriter out = this.getOut();
-    MessageFormatter formatter = this.getMessageFormatter();
+    final TerminalController tc = getTerminalController();
+    final int w = getTerminalSettings().getWidth();
+    final DisplayController dc = getDisplayController();
+    final PrintWriter out = getOut();
+    final MessageFormatter formatter = getMessageFormatter();
     tc.eraseScreen();
     tc.setCursor(0, 0);
     dc.messageHeader();
@@ -73,10 +78,12 @@ public class FullscreenMessageEditor extends FullscreenEditor implements Message
     }
     PrintUtils.printLeftJustified(out, recipientHeader, w);
     out.println();
-    String subjLine = formatter.format("simple.editor.subject");
+    final String subjLine = formatter.format("simple.editor.subject");
     out.print(subjLine);
-    String subject = this.getSubject();
-    if (subject == null) subject = "";
+    String subject = getSubject();
+    if (subject == null) {
+      subject = "";
+    }
     dc.messageBody();
     PrintUtils.printLeftJustified(out, subject, w - subjLine.length());
     out.println();
@@ -85,27 +92,28 @@ public class FullscreenMessageEditor extends FullscreenEditor implements Message
     out.flush();
   }
 
+  @Override
   protected void refresh() {
-    this.printHeader();
-    this.getOut().println();
-    this.getDisplayController().messageBody();
+    printHeader();
+    getOut().println();
+    getDisplayController().messageBody();
     super.refresh();
   }
 
   public UnstoredMessage edit(
-      MessageLocator replyTo,
-      long recipientId,
-      Name recipientName,
-      long replyToAuthor,
-      Name replyToAuthorName,
-      String oldSubject,
-      boolean askForSubject)
+      final MessageLocator replyTo,
+      final long recipientId,
+      final Name recipientName,
+      final long replyToAuthor,
+      final Name replyToAuthorName,
+      final String oldSubject,
+      final boolean askForSubject)
       throws KOMException, InterruptedException {
-    TerminalController tc = this.getTerminalController();
-    DisplayController dc = this.getDisplayController();
-    PrintWriter out = this.getOut();
-    LineEditor in = this.getIn();
-    MessageFormatter formatter = this.getMessageFormatter();
+    final TerminalController tc = getTerminalController();
+    final DisplayController dc = getDisplayController();
+    final PrintWriter out = getOut();
+    final LineEditor in = getIn();
+    final MessageFormatter formatter = getMessageFormatter();
     try {
       tc.eraseScreen();
       tc.setCursor(0, 0);
@@ -114,14 +122,14 @@ public class FullscreenMessageEditor extends FullscreenEditor implements Message
       // Handle reply
       //
       if (replyTo.isValid()) {
-        if (this.getRecipient().getId() == recipientId) {
+        if (getRecipient().getId() == recipientId) {
           // Simple case: Original text is in same conference
           //
           replyHeader =
               formatter.format(
                   "CompactMessagePrinter.reply.to.same.conference",
                   new Object[] {
-                    replyTo.getLocalnum(), this.formatObjectName(replyToAuthorName, replyToAuthor)
+                    replyTo.getLocalnum(), formatObjectName(replyToAuthorName, replyToAuthor)
                   });
         } else {
           // Complex case: Original text was in a different conference
@@ -131,8 +139,8 @@ public class FullscreenMessageEditor extends FullscreenEditor implements Message
                   "CompactMessagePrinter.reply.to.different.conference",
                   new Object[] {
                     new Long(replyTo.getLocalnum()),
-                    this.formatObjectName(recipientName, recipientId),
-                    this.formatObjectName(replyToAuthorName, replyToAuthor)
+                    formatObjectName(recipientName, recipientId),
+                    formatObjectName(replyToAuthorName, replyToAuthor)
                   });
         }
       }
@@ -140,56 +148,60 @@ public class FullscreenMessageEditor extends FullscreenEditor implements Message
       // Construct receiver
       //
       recipientHeader =
-          formatter.format("simple.editor.receiver", this.formatObjectName(this.getRecipient()));
-      this.printHeader();
+          formatter.format("simple.editor.receiver", formatObjectName(getRecipient()));
+      printHeader();
 
       // Read subject
       //
       tc.up(1);
       dc.input();
       out.flush();
-      this.setSubject(askForSubject ? in.readLine(oldSubject) : oldSubject);
+      setSubject(askForSubject ? in.readLine(oldSubject) : oldSubject);
 
       // Establish viewport
       //
-      headerRows = NUM_HEADER_ROWS;
-      if (replyTo.isValid()) ++headerRows;
-      this.pushViewport(headerRows, this.getTerminalSettings().getHeight() - 1);
-      this.refresh();
+      headerRows = FullscreenMessageEditor.NUM_HEADER_ROWS;
+      if (replyTo.isValid()) {
+        ++headerRows;
+      }
+      pushViewport(headerRows, getTerminalSettings().getHeight() - 1);
+      refresh();
 
       // Enter the main editor loop
       //
-      boolean pageBreak = in.getPageBreak();
+      final boolean pageBreak = in.getPageBreak();
       in.setPageBreak(false);
       try {
-        this.mainloop();
+        mainloop();
       } finally {
         in.setPageBreak(pageBreak);
-        this.popViewport();
+        popViewport();
       }
-      return new UnstoredMessage(this.getSubject(), this.getBuffer().toString());
-    } catch (IOException e) {
+      return new UnstoredMessage(getSubject(), getBuffer().toString());
+    } catch (final IOException e) {
       throw new KOMRuntimeException(formatter.format("error.reading.user.input"), e);
     }
   }
 
+  @Override
   public UnstoredMessage edit(
-      MessageLocator replyTo,
-      long recipientId,
-      Name recipientName,
-      long replyToAuthor,
-      Name replyToAuthorName,
-      String oldSubject)
+      final MessageLocator replyTo,
+      final long recipientId,
+      final Name recipientName,
+      final long replyToAuthor,
+      final Name replyToAuthorName,
+      final String oldSubject)
       throws KOMException, InterruptedException {
-    return this.edit(
+    return edit(
         replyTo, recipientId, recipientName, replyToAuthor, replyToAuthorName, oldSubject, true);
   }
 
+  @Override
   protected KeystrokeTokenizer getKeystrokeTokenizer() {
     // Get a copy of the keystroke tokenizer definition
     //
-    KeystrokeTokenizerDefinition kstd =
-        this.getTerminalController().getKeystrokeTokenizer().getDefinition().deepCopy();
+    final KeystrokeTokenizerDefinition kstd =
+        getTerminalController().getKeystrokeTokenizer().getDefinition().deepCopy();
 
     // Add keystrokes specific to us
     //
@@ -209,82 +221,84 @@ public class FullscreenMessageEditor extends FullscreenEditor implements Message
       kstd.addPattern(
           "\u000bq", Keystrokes.TOKEN_QUOTE | Keystrokes.TOKEN_MOFIDIER_BREAK); // Ctrl-K q
       return kstd.createKeystrokeTokenizer();
-    } catch (AmbiguousPatternException e) {
-      Logger.error(this, "Ambigous keystroke pattern", e);
+    } catch (final AmbiguousPatternException e) {
+      LOG.error("Ambigous keystroke pattern", e);
       throw new RuntimeException(e);
     }
   }
 
-  protected void unknownToken(KeystrokeTokenizer.Token token) throws EscapeException {
-    LineEditor in = this.getIn();
+  @Override
+  protected void unknownToken(final KeystrokeTokenizer.Token token) throws EscapeException {
+    final LineEditor in = getIn();
     try {
 
       switch (token.getKind() & ~Keystrokes.TOKEN_MOFIDIER_BREAK) {
         case Keystrokes.TOKEN_QUOTE:
-          this.quote();
+          quote();
           break;
         case Keystrokes.TOKEN_COMMAND:
           in.popTokenizer();
           try {
-            TerminalController tc = this.getTerminalController();
+            final TerminalController tc = getTerminalController();
             tc.eraseScreen();
             tc.setCursor(0, 0);
-            Shell i = new Shell(Parser.load("fullscreeneditorcommands.xml", this));
+            final Shell i = new Shell(Parser.load("fullscreeneditorcommands.xml", this));
             i.run(this, "editor");
-            this.refresh();
+            refresh();
           } finally {
-            in.pushTokenizer(this.getKeystrokeTokenizer());
+            in.pushTokenizer(getKeystrokeTokenizer());
           }
           break;
         default:
           super.unknownToken(token);
       }
-    } catch (IOException e) {
+    } catch (final IOException e) {
       throw new RuntimeException(e);
-    } catch (KOMException e) {
+    } catch (final KOMException e) {
       throw new RuntimeException(e);
     }
   }
 
-  protected void addQuote(String line) {
-    Buffer buffer = this.getBuffer();
+  protected void addQuote(final String line) {
+    final Buffer buffer = getBuffer();
     buffer.set(m_cy + m_viewportStart, line + '\n');
     // buffer.setNewline(m_cy + m_viewportStart, true);
-    this.insertLine("");
-    this.refreshCurrentLine();
-    this.moveDown();
+    insertLine("");
+    refreshCurrentLine();
+    moveDown();
     m_tc.eraseToEndOfLine();
   }
 
   public void quote() throws KOMException, IOException {
-    KOMWriter out = this.getOut();
-    MessageLocator replyTo = this.getReplyTo();
-    if (!replyTo.isValid()) return;
+    final KOMWriter out = getOut();
+    final MessageLocator replyTo = getReplyTo();
+    if (!replyTo.isValid()) {
+      return;
+    }
     try {
-      int middle = (this.getTerminalSettings().getHeight() - headerRows) / 2;
-      this.pushViewport(0, middle);
-      QuoteEditor quoter = new QuoteEditor(this, replyTo, this);
-      this.revealCursor(false);
-      this.refreshViewport();
+      final int middle = (getTerminalSettings().getHeight() - headerRows) / 2;
+      pushViewport(0, middle);
+      final QuoteEditor quoter = new QuoteEditor(this, replyTo, this);
+      revealCursor(false);
+      refreshViewport();
       m_tc.setCursor(middle, 0);
       m_tc.reverseVideo();
       m_tc.messageHeader();
-      String divider = "--" + this.getMessageFormatter().format("fullscreen.editor.quote.help");
+      final String divider = "--" + getMessageFormatter().format("fullscreen.editor.quote.help");
       out.print(divider);
-      PrintUtils.printRepeated(
-          out, '-', this.getTerminalSettings().getWidth() - divider.length() - 1);
+      PrintUtils.printRepeated(out, '-', getTerminalSettings().getWidth() - divider.length() - 1);
       m_tc.reset();
       m_tc.messageBody();
-      quoter.pushViewport(middle + 5, this.getTerminalSettings().getHeight() - 1);
+      quoter.pushViewport(middle + 5, getTerminalSettings().getHeight() - 1);
       quoter.edit();
-      this.refresh();
-    } catch (InterruptedException e) {
+      refresh();
+    } catch (final InterruptedException e) {
       // Just return
-    } catch (EmptyMessageException e) {
+    } catch (final EmptyMessageException e) {
       // Can't quote an emty message
     } finally {
-      this.popViewport();
-      this.refresh();
+      popViewport();
+      refresh();
     }
   }
 }

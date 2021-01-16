@@ -6,7 +6,7 @@
  */
 package nu.rydin.kom.structs;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class UnstoredMessage {
   private final String m_subject;
 

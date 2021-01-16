@@ -12,97 +12,52 @@ import java.net.Socket;
 import java.util.Map;
 import nu.rydin.kom.backend.ServerSessionFactory;
 import nu.rydin.kom.exceptions.NoSuchModuleException;
-import nu.rydin.kom.exceptions.UnexpectedException;
 import nu.rydin.kom.frontend.text.ClientSession;
 import nu.rydin.kom.frontend.text.TelnetInputStream;
-import nu.rydin.kom.utils.Logger;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /**
  * A simple telnet server. Listens to a port, and kicks of threads handling the sessions when an
  * incoming connection is detected.
  *
- * @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a>
+ * @author Pontus Rydin
  */
 public class TelnetServer implements Module, Runnable {
-  /**
-   * Cleans up after dead telnet session threads.
-   *
-   * @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a>
-   */
-  private static class SessionReaper extends Thread {
-    private Socket m_socket;
-
-    private Thread m_clientThread;
-
-    private ClientSession m_session;
-
-    public SessionReaper(Socket socket, Thread clientThread, ClientSession session) {
-      super("SessionReaper");
-      m_socket = socket;
-      m_clientThread = clientThread;
-      m_session = session;
-    }
-
-    public void run() {
-      // Wait for the client to die
-      //
-      try {
-        m_clientThread.join();
-        try {
-          m_session.shutdown();
-        } catch (UnexpectedException e) {
-          e.printStackTrace();
-        }
-        Logger.info(this, "Disconnected from " + m_socket.getInetAddress().getHostAddress());
-      } catch (InterruptedException e) {
-        // Interruped while waiting? We're going down, so
-        // just fall thru and kill the connection.
-        //
-      } finally {
-        try {
-          m_socket.close();
-        } catch (IOException e) {
-          // IO error here? Tough luck...
-          //
-          e.printStackTrace();
-        }
-
-        // Release references
-        //
-        m_socket = null;
-        m_clientThread = null;
-        m_session = null;
-      }
-    }
-  }
-
+  private static final Logger LOG = LogManager.getLogger(TelnetServer.class);
   private ServerSocket m_socket;
   private Thread m_thread;
   private boolean m_useTicket;
   private boolean m_selfRegister;
   private Map<String, String> parameters;
 
-  public void start(Map<String, String> parameters) {
+  public static void main(final String[] args) {
+    LOG.fatal(
+        "Starting TelnetServer directly is no longer supported. Use rydin.nu.kom.boot.Bootstrap instead.");
+  }
+
+  @Override
+  public void start(final Map<String, String> parameters) {
     this.parameters = parameters;
 
     // Perform checks before start.
     //
-    int port = Integer.parseInt((String) parameters.get("port"));
+    final int port = Integer.parseInt(parameters.get("port"));
     m_useTicket = "ticket".equals(parameters.get("authentication"));
     m_selfRegister = "true".equals(parameters.get("selfRegister"));
 
     try {
       m_socket = new ServerSocket(port);
       m_socket.setReceiveBufferSize(65536);
-    } catch (IOException e) {
+    } catch (final IOException e) {
       // We can't even listen on the socket. Most likely, someone
       // else is already listening to that port. In any case, we're
       // out of here!
       //
-      Logger.fatal(this, e);
+      LOG.fatal(e);
       return;
     }
-    Logger.info(this, "OpenKOM telnet server is accepting connections at port " + port);
+    LOG.info("OpenKOM telnet server is accepting connections at port " + port);
 
     // Start server thread
     //
@@ -110,41 +65,45 @@ public class TelnetServer implements Module, Runnable {
     m_thread.start();
   }
 
+  @Override
   public void stop() {
     try {
       m_thread.interrupt();
       m_socket.close();
-    } catch (IOException e) {
-      Logger.error(this, "Exception while shutting down", e);
+    } catch (final IOException e) {
+      LOG.error("Exception while shutting down", e);
     }
   }
 
+  @Override
   public void join() throws InterruptedException {
-    if (m_thread != null) m_thread.join();
+    if (m_thread != null) {
+      m_thread.join();
+    }
   }
 
+  @Override
   public void run() {
-    ServerSessionFactory ssf = null;
+    final ServerSessionFactory ssf;
     try {
       ssf = (ServerSessionFactory) Modules.getModule("Backend");
-    } catch (NoSuchModuleException e) {
+    } catch (final NoSuchModuleException e) {
       throw new RuntimeException("PANIC: Backend not found", e);
     }
     for (; ; ) {
       try {
         // Wait for someone to connect
         //
-        Socket incoming = m_socket.accept();
+        final Socket incoming = m_socket.accept();
         incoming.setKeepAlive(true);
-        String clientName = incoming.getInetAddress().getHostAddress();
+        final String clientName = incoming.getInetAddress().getHostAddress();
 
         // Check if connection is blacklisted
         //
         if (ssf.isBlacklisted(clientName)) {
-          Logger.info("Rejecting blackisted client: " + clientName);
+          LOG.info("Rejecting blacklisted client: " + clientName);
         }
-        Logger.info(
-            this,
+        LOG.info(
             "Incoming connection from "
                 + clientName
                 + ". Buffer size="
@@ -152,9 +111,9 @@ public class TelnetServer implements Module, Runnable {
         try {
           // Create session
           //
-          TelnetInputStream eis =
+          final TelnetInputStream eis =
               new TelnetInputStream(incoming.getInputStream(), incoming.getOutputStream());
-          ClientSession client =
+          final ClientSession client =
               new ClientSession(
                   eis,
                   incoming.getOutputStream(),
@@ -169,29 +128,71 @@ public class TelnetServer implements Module, Runnable {
           // Also create a SessionReaper that will be woken up when the
           // session dies to perform post-mortem cleanup.
           //
-          Thread clientThread = new Thread(client, "Session (not logged in)");
-          Thread reaper = new SessionReaper(incoming, clientThread, client);
+          final Thread clientThread = new Thread(client, "Session (not logged in)");
+          final Thread reaper = new SessionReaper(incoming, clientThread, client);
           reaper.start();
           clientThread.start();
-        } catch (Exception e) {
+        } catch (final Exception e) {
           // Couldn't create session. Kill connection!
           //
           e.printStackTrace();
           incoming.close();
-          continue;
         }
-      } catch (IOException e) {
+      } catch (final IOException e) {
         // Error accepting. Not good. Try again!
         //
         e.printStackTrace();
-        continue;
       }
     }
   }
 
-  public static void main(String[] args) {
-    Logger.fatal(
-        TelnetServer.class,
-        "Starting TelnetServer directly is no longer supported. Use rydin.nu.kom.boot.Bootstrap instead.");
+  /**
+   * Cleans up after dead telnet session threads.
+   *
+   * @author Pontus Rydin
+   */
+  private static class SessionReaper extends Thread {
+    private Socket m_socket;
+
+    private Thread m_clientThread;
+
+    private ClientSession m_session;
+
+    public SessionReaper(
+        final Socket socket, final Thread clientThread, final ClientSession session) {
+      super("SessionReaper");
+      m_socket = socket;
+      m_clientThread = clientThread;
+      m_session = session;
+    }
+
+    @Override
+    public void run() {
+      // Wait for the client to die
+      //
+      try {
+        m_clientThread.join();
+        m_session.shutdown();
+        LOG.info("Disconnected from " + m_socket.getInetAddress().getHostAddress());
+      } catch (final InterruptedException e) {
+        // Interrupted while waiting? We're going down, so
+        // just fall thru and kill the connection.
+        //
+      } finally {
+        try {
+          m_socket.close();
+        } catch (final IOException e) {
+          // IO error here? Tough luck...
+          //
+          e.printStackTrace();
+        }
+
+        // Release references
+        //
+        m_socket = null;
+        m_clientThread = null;
+        m_session = null;
+      }
+    }
   }
 }

@@ -6,7 +6,7 @@
  */
 package nu.rydin.kom.exceptions;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class StopCharException extends LineEditorException {
   static final long serialVersionUID = 2005;
 

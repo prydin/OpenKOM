@@ -1,29 +1,31 @@
 package nu.rydin.kom.structs;
 
-import nu.rydin.kom.utils.Logger;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
-/** @author <a href=mailto:jepson@xyzzy.se>Jepson</a> */
+/** @author Jepson */
 public class IntrusionAttempt {
+  private static final Logger LOG = LogManager.getLogger(IntrusionAttempt.class);
   private final String host;
   private final long firstAttempt;
+  private final int limit;
+  private final long lockout;
   private long lastAttempt;
   private int count;
   private boolean isBlocked;
-  private final int limit;
-  private final long lockout;
 
-  public long getLockout() {
-    return lockout;
-  }
-
-  public IntrusionAttempt(String host, int limit, long lockout) {
+  public IntrusionAttempt(final String host, final int limit, final long lockout) {
     this.host = host;
     this.limit = limit;
     this.lockout = lockout;
-    this.isBlocked = false;
-    this.firstAttempt = System.currentTimeMillis();
-    this.lastAttempt = this.firstAttempt;
-    this.addAttempt();
+    isBlocked = false;
+    firstAttempt = System.currentTimeMillis();
+    lastAttempt = firstAttempt;
+    addAttempt();
+  }
+
+  public long getLockout() {
+    return lockout;
   }
 
   public String getHost() {
@@ -43,12 +45,12 @@ public class IntrusionAttempt {
   }
 
   public void addAttempt() {
-    ++this.count;
-    Logger.debug(this, "Login failed for host: " + host + ". Number of attempts: " + count);
+    ++count;
+    LOG.debug("Login failed for host: " + host + ". Number of attempts: " + count);
     lastAttempt = System.currentTimeMillis();
-    if (limit <= this.count) {
+    if (limit <= count) {
       isBlocked = true;
-      Logger.info(this, "Blacklisted host: " + host + " for " + (lockout / 1000) + " seconds");
+      LOG.info("Blacklisted host: " + host + " for " + (lockout / 1000) + " seconds");
     }
   }
 

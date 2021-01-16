@@ -15,7 +15,7 @@ import nu.rydin.kom.frontend.text.KOMWriter;
 import nu.rydin.kom.frontend.text.parser.CommandLineParameter;
 import nu.rydin.kom.i18n.MessageFormatter;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public abstract class AbstractSelect extends AbstractCommand {
   public AbstractSelect(String fullName, CommandLineParameter[] signature, long permissions) {
     super(fullName, signature, permissions);

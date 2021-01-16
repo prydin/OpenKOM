@@ -26,15 +26,15 @@ import nu.rydin.kom.structs.UserInfo;
  * @author Pontus Rydin
  */
 public class UserContext {
-  private long user;
+  private final long user;
   private MembershipList memberships;
   private Map<Long, Long> filterCache;
 
-  public UserContext(long user, MembershipManager mm, RelationshipManager rm)
-      throws UnexpectedException, ObjectNotFoundException {
+  public UserContext(final long user, final MembershipManager mm, final RelationshipManager rm)
+      throws UnexpectedException {
     this.user = user;
-    this.loadMemberships(mm);
-    this.loadFilters(rm);
+    loadMemberships(mm);
+    loadFilters(rm);
   }
 
   public long getUserId() {
@@ -49,70 +49,70 @@ public class UserContext {
     return memberships;
   }
 
-  public synchronized void loadMemberships(MembershipManager mm)
-      throws UnexpectedException, ObjectNotFoundException {
+  public synchronized void loadMemberships(final MembershipManager mm) throws UnexpectedException {
     try {
       memberships = new MembershipList(mm.listMembershipsByUser(user));
-    } catch (SQLException e) {
+    } catch (final SQLException e) {
       throw new UnexpectedException(user, e);
     }
   }
 
-  public synchronized void loadFilters(RelationshipManager rm) throws UnexpectedException {
+  public synchronized void loadFilters(final RelationshipManager rm) throws UnexpectedException {
     try {
-      filterCache = new HashMap<Long, Long>();
-      Relationship[] rels = rm.listByRefererAndKind(user, RelationshipKinds.FILTER);
-      for (int idx = 0; idx < rels.length; idx++) {
-        Relationship jinge = rels[idx];
+      filterCache = new HashMap<>();
+      final Relationship[] rels = rm.listByRefererAndKind(user, RelationshipKinds.FILTER);
+      for (final Relationship jinge : rels) {
         filterCache.put(jinge.getReferee(), jinge.getFlags());
       }
-    } catch (SQLException e) {
+    } catch (final SQLException e) {
       throw new UnexpectedException(user, e);
     }
   }
 
-  public synchronized void saveMemberships(MembershipManager mm) throws UnexpectedException {
+  public synchronized void saveMemberships(final MembershipManager mm) throws UnexpectedException {
     try {
       memberships.save(user, mm);
-    } catch (SQLException e) {
+    } catch (final SQLException e) {
       throw new UnexpectedException(user, e);
     }
   }
 
-  public boolean allowsChat(UserManager um, long sender)
+  public boolean allowsChat(final UserManager um, final long sender)
       throws ObjectNotFoundException, UnexpectedException {
     try {
-      UserInfo ui = um.loadUser(this.user);
+      final UserInfo ui = um.loadUser(user);
       return ui.testFlags(0, UserFlags.ALLOW_CHAT_MESSAGES)
-          && !this.userMatchesFilter(sender, FilterFlags.CHAT);
-    } catch (SQLException e) {
+          && !userMatchesFilter(sender, FilterFlags.CHAT);
+    } catch (final SQLException e) {
       throw new UnexpectedException(user, e);
     }
   }
 
-  public boolean allowsBroadcast(UserManager um, long sender)
+  public boolean allowsBroadcast(final UserManager um, final long sender)
       throws ObjectNotFoundException, UnexpectedException {
     try {
-      UserInfo ui = um.loadUser(this.user);
+      final UserInfo ui = um.loadUser(user);
       return ui.testFlags(0, UserFlags.ALLOW_BROADCAST_MESSAGES)
-          && !this.userMatchesFilter(sender, FilterFlags.BROADCASTS);
-    } catch (SQLException e) {
+          && !userMatchesFilter(sender, FilterFlags.BROADCASTS);
+    } catch (final SQLException e) {
       throw new UnexpectedException(user, e);
     }
   }
 
-  protected boolean userMatchesFilter(long user, long neededFlags) {
-    Long flagObj = (Long) filterCache.get(new Long(user));
-    if (flagObj == null) return false;
-    long flags = flagObj.longValue();
+  protected boolean userMatchesFilter(final long user, final long neededFlags) {
+    final Long flags = filterCache.get(user);
+    if (flags == null) {
+      return false;
+    }
     return (flags & neededFlags) == neededFlags;
   }
 
-  protected void reloadMemberships(MembershipManager mm)
-      throws ObjectNotFoundException, SQLException {
+  protected void reloadMemberships(final MembershipManager mm) throws SQLException {
     // Load membership infos into cache
     //
-    if (memberships != null) memberships.save(user, mm);
+    if (memberships != null) {
+      memberships.save(user, mm);
+    }
     memberships = new MembershipList(mm.listMembershipsByUser(user));
   }
 }

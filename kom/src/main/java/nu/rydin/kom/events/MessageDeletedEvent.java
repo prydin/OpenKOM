@@ -6,7 +6,7 @@
  */
 package nu.rydin.kom.events;
 
-/** @author <a href=mailto:jepson@xyzzy.se>Jepson</a> */
+/** @author Jepson */
 public class MessageDeletedEvent extends Event {
   private long m_confId = -1;
 

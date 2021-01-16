@@ -5,7 +5,6 @@
  */
 package nu.rydin.kom.backend;
 
-import edu.oswego.cs.dl.util.concurrent.Mutex;
 import java.io.ByteArrayOutputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -22,6 +21,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Stack;
 import java.util.StringTokenizer;
+import java.util.concurrent.Semaphore;
 import nu.rydin.kom.backend.data.ConferenceManager;
 import nu.rydin.kom.backend.data.FileManager;
 import nu.rydin.kom.backend.data.MembershipManager;
@@ -55,7 +55,6 @@ import nu.rydin.kom.events.NewMessageEvent;
 import nu.rydin.kom.events.ReloadUserProfileEvent;
 import nu.rydin.kom.events.UserAttendanceEvent;
 import nu.rydin.kom.exceptions.AlreadyMemberException;
-import nu.rydin.kom.exceptions.AmbiguousNameException;
 import nu.rydin.kom.exceptions.AuthenticationException;
 import nu.rydin.kom.exceptions.AuthorizationException;
 import nu.rydin.kom.exceptions.BadPasswordException;
@@ -104,13 +103,15 @@ import nu.rydin.kom.structs.UserListItem;
 import nu.rydin.kom.structs.UserLogItem;
 import nu.rydin.kom.utils.FileUtils;
 import nu.rydin.kom.utils.FilterUtils;
-import nu.rydin.kom.utils.Logger;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /**
- * @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a>
- * @author <a href=mailto:jepson@xyzzy.se>Jepson</a>
+ * @author Pontus Rydin
+ * @author Jepson
  */
 public class ServerSessionImpl implements ServerSession, EventTarget, EventSource {
+  private static final Logger LOG = LogManager.getLogger(ServerSessionImpl.class);
   private static final int MAX_SELECTION = 1000;
   /** User variables shared across sessions for the same user */
   protected final UserContext m_userContext;
@@ -130,7 +131,7 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
   /** Usage statistics */
   private final UserLogItem m_stats;
   /** Mutex controlling session access */
-  private final Mutex m_mutex = new Mutex();
+  private final Semaphore m_mutex = new Semaphore(1);
 
   /** The user currently logged in */
   private final long m_userId;
@@ -233,7 +234,7 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
         m_da.commit();
         m_da = null;
       }
-    } catch (final SQLException | ObjectNotFoundException e) {
+    } catch (final SQLException e) {
       throw new UnexpectedException(getLoggedInUserId(), e);
     } finally {
       if (m_da != null) {
@@ -358,7 +359,7 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
           } catch (final ObjectNotFoundException e) {
             // Problem reading next mail. Try conferences instead
             //
-            Logger.error(this, "Error finding next mail", e);
+            LOG.error("Error finding next mail", e);
           }
         }
 
@@ -395,7 +396,7 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
           } catch (final ObjectNotFoundException e) {
             // Problem getting next reply. Try messages
             //
-            Logger.error(this, "Error finding next reply", e);
+            LOG.error("Error finding next reply", e);
           }
         }
 
@@ -411,7 +412,7 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
           try {
             reloadMemberships();
           } catch (final ObjectNotFoundException e2) {
-            Logger.error(this, "Strange state!", e);
+            LOG.error("Strange state!", e);
             return new SessionState(CommandSuggestions.ERROR, -1, 0);
           }
         }
@@ -438,7 +439,7 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
           // Problems finding next message in this conference. Try
           // next conference
           //
-          Logger.error(this, "Error when looking for next message", e);
+          LOG.error("Error when looking for next message", e);
         }
 
         // Get next conference with unread messages
@@ -457,7 +458,7 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
             0);
       }
     } catch (final SQLException | UnexpectedException e) {
-      Logger.error(this, "Strange state!", e);
+      LOG.error("Strange state!", e);
       return new SessionState(CommandSuggestions.ERROR, -1, 0);
     }
   }
@@ -467,8 +468,8 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
       throws UnexpectedException {
     try {
       final MessageManager mm = m_da.getMessageManager();
-      boolean skip = false;
-      MessageHeader mh = null;
+      boolean skip;
+      final MessageHeader mh;
       try {
         mh = mm.loadMessageHeader(message);
         skip = m_userContext.userMatchesFilter(mh.getAuthor(), filter);
@@ -486,14 +487,7 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
 
       // Skip this message. Mark it as read.
       //
-      try {
-        m_userContext.getMemberships().markAsRead(conference, localnum);
-      } catch (final ObjectNotFoundException e) {
-        // Not found when trying to mark it as read? I guess
-        // it has disappeared then!
-        //
-        Logger.error(this, "Object not found when marking as read", e);
-      }
+      m_userContext.getMemberships().markAsRead(conference, localnum);
       return true;
     } catch (final SQLException e) {
       throw new UnexpectedException(getLoggedInUserId(), e);
@@ -669,8 +663,7 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
       final int nonmemberPermissions,
       final short visibility,
       final long replyConf)
-      throws UnexpectedException, AmbiguousNameException, DuplicateNameException,
-          AuthorizationException {
+      throws UnexpectedException, DuplicateNameException, AuthorizationException {
     checkRights(UserPermissions.CREATE_CONFERENCE);
     try {
       final long userId = getLoggedInUserId();
@@ -703,8 +696,8 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
   public ConferenceListItem[] listConferencesByDate() throws UnexpectedException {
     try {
       return (ConferenceListItem[])
-          censorNames(m_da.getConferenceManager().listByDate(getLoggedInUserId()));
-    } catch (final SQLException | ObjectNotFoundException e) {
+          redactNames(m_da.getConferenceManager().listByDate(getLoggedInUserId()));
+    } catch (final SQLException e) {
       throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
@@ -714,8 +707,8 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
   public ConferenceListItem[] listConferencesByName() throws UnexpectedException {
     try {
       return (ConferenceListItem[])
-          censorNames(m_da.getConferenceManager().listByName(getLoggedInUserId()));
-    } catch (final SQLException | ObjectNotFoundException e) {
+          redactNames(m_da.getConferenceManager().listByName(getLoggedInUserId()));
+    } catch (final SQLException e) {
       throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
@@ -1111,8 +1104,7 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
       final long flags3,
       final long flags4,
       final long rights)
-      throws UnexpectedException, AmbiguousNameException, DuplicateNameException,
-          AuthorizationException {
+      throws UnexpectedException, DuplicateNameException, AuthorizationException {
     checkRights(UserPermissions.USER_ADMIN);
     try {
       // Create the user
@@ -1231,8 +1223,8 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
   public NameAssociation[] getAssociationsForPattern(final String pattern)
       throws UnexpectedException {
     try {
-      return censorNames(m_da.getNameManager().getAssociationsByPattern(pattern));
-    } catch (final SQLException | ObjectNotFoundException e) {
+      return redactNames(m_da.getNameManager().getAssociationsByPattern(pattern));
+    } catch (final SQLException e) {
       throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
@@ -1241,8 +1233,8 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
   public NameAssociation[] getAssociationsForPatternAndKind(final String pattern, final short kind)
       throws UnexpectedException {
     try {
-      return censorNames(m_da.getNameManager().getAssociationsByPatternAndKind(pattern, kind));
-    } catch (final SQLException | ObjectNotFoundException e) {
+      return redactNames(m_da.getNameManager().getAssociationsByPatternAndKind(pattern, kind));
+    } catch (final SQLException e) {
       throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
@@ -1510,7 +1502,7 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
     try {
       allconfs = m_da.getConferenceManager().getConferenceIdsByPattern("%");
       memberOf = mm.listMembershipsByUser(uid);
-    } catch (final SQLException | ObjectNotFoundException e) {
+    } catch (final SQLException e) {
       throw new UnexpectedException(uid, e);
     }
 
@@ -1722,8 +1714,7 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
   }
 
   @Override
-  public NameAssociation[] listMemberships(final long userId)
-      throws ObjectNotFoundException, UnexpectedException {
+  public NameAssociation[] listMemberships(final long userId) throws UnexpectedException {
     try {
       final MembershipInfo[] mi = m_da.getMembershipManager().listMembershipsByUser(userId);
       final int top = mi.length;
@@ -1740,15 +1731,14 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
                   conf, new Name("???", Visibilities.PUBLIC, NameManager.CONFERENCE_KIND));
         }
       }
-      return censorNames(answer);
+      return redactNames(answer);
     } catch (final SQLException e) {
       throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
   @Override
-  public MembershipInfo[] listConferenceMembers(final long confId)
-      throws ObjectNotFoundException, UnexpectedException {
+  public MembershipInfo[] listConferenceMembers(final long confId) throws UnexpectedException {
     try {
       return m_da.getMembershipManager().listMembershipsByConference(confId);
     } catch (final SQLException e) {
@@ -1934,7 +1924,7 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
       final MembershipListItem[] answer = new MembershipListItem[list.size()];
       list.toArray(answer);
       return answer;
-    } catch (final SQLException | ObjectNotFoundException e) {
+    } catch (final SQLException e) {
       throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
@@ -3043,12 +3033,8 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
     int count = 0;
     for (; count < n && m_readLog != null; m_readLog = m_readLog.getPrevious()) {
       conf = m_readLog.getConference();
-      try {
-        m_userContext.getMemberships().markAsUnread(conf, m_readLog.getLocalNum());
-        ++count;
-      } catch (final ObjectNotFoundException e) {
-        // The conference disappeared. Not much we can do!
-      }
+      m_userContext.getMemberships().markAsUnread(conf, m_readLog.getLocalNum());
+      ++count;
     }
 
     // Go to the conference of the last unread message
@@ -3535,10 +3521,10 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
     // Is this a new text in our mailbox? Then we're definately interested in it
     // and should always pass it on!
     //
-    final boolean debug = Logger.isDebugEnabled(this);
+    final boolean debug = LOG.isDebugEnabled();
     if (e.getConference() == getLoggedInUserId()) {
       if (debug) {
-        Logger.debug(this, "New mail. Passing event to client");
+        LOG.debug("New mail. Passing event to client");
       }
       postEvent(e);
       return;
@@ -3547,12 +3533,12 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
     // Already have unread messages? No need to send event!
     //
     if (debug) {
-      Logger.debug(this, "NewMessageEvent received. Conf=" + e.getConference());
+      LOG.debug("NewMessageEvent received. Conf=" + e.getConference());
     }
     if (m_lastSuggestedCommand == CommandSuggestions.NEXT_MESSAGE
         || m_lastSuggestedCommand == CommandSuggestions.NEXT_REPLY) {
       if (debug) {
-        Logger.debug(this, "Event ignored since we already have an unread text in this conference");
+        LOG.debug("Event ignored since we already have an unread text in this conference");
       }
       return;
     }
@@ -3567,8 +3553,7 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
       if (m_lastSuggestedCommand == CommandSuggestions.NEXT_CONFERENCE
           && conf != getCurrentConferenceId()) {
         if (debug) {
-          Logger.debug(
-              this, "Event ignored because we're already suggesting going to the next conference");
+          LOG.debug("Event ignored because we're already suggesting going to the next conference");
         }
         return;
       }
@@ -3577,17 +3562,15 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
       //
       m_userContext.getMemberships().get(conf);
       if (debug) {
-        Logger.debug(this, "Passing event to client");
+        LOG.debug("Passing event to client");
       }
       postEvent(e);
     } catch (final ObjectNotFoundException ex) {
       // Not a member. No need to notify client
       //
       if (debug) {
-        Logger.debug(
-            this, "Event ignored because we're not members where the new message was posted");
+        LOG.debug("Event ignored because we're not members where the new message was posted");
       }
-      return;
     }
   }
 
@@ -3605,7 +3588,7 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
     } catch (final Exception e) {
       // We're called from an event handler, so what can we do?
       //
-      Logger.error(this, "Error in event handler", e);
+      LOG.error("Error in event handler", e);
       return null;
     } finally {
       if (da != null) {
@@ -3616,15 +3599,6 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
 
   protected UserInfo getLoggedInUserInEventHandler() {
     return getUserInEventHandler(getLoggedInUserId());
-  }
-
-  protected boolean testUserFlagInEventHandler(
-      final long user, final int flagword, final long mask) {
-    final UserInfo ui = getUserInEventHandler(user);
-    if (ui == null) {
-      return false;
-    }
-    return ui.testFlags(flagword, mask);
   }
 
   @Override
@@ -3653,9 +3627,9 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
       final long user, final int offset, final int length) throws UnexpectedException {
     try {
       return removeDuplicateMessages(
-          censorMessages(
+          redactMessages(
               m_da.getMessageManager().listMessagesGloballyByAuthor(user, offset, length)));
-    } catch (final SQLException | ObjectNotFoundException e) {
+    } catch (final SQLException e) {
       throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
@@ -3782,9 +3756,9 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
       final String searchterm, final int offset, final int length) throws UnexpectedException {
     try {
       return removeDuplicateMessages(
-          censorMessages(
+          redactMessages(
               m_da.getMessageManager().searchMessagesGlobally(searchterm, offset, length)));
-    } catch (final SQLException | ObjectNotFoundException e) {
+    } catch (final SQLException e) {
       throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
@@ -3848,7 +3822,7 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
     // take the easy route to making thing unique.
     //
     long lastId = -1;
-    final List<MessageSearchResult> answer = new ArrayList<MessageSearchResult>(messages.length);
+    final List<MessageSearchResult> answer = new ArrayList<>(messages.length);
     for (final MessageSearchResult each : messages) {
       if (each.getGlobalId() != lastId) {
         answer.add(each);
@@ -3861,54 +3835,48 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
   protected GlobalMessageSearchResult[] removeDuplicateMessages(
       final GlobalMessageSearchResult[] messages) {
     final List<MessageSearchResult> result = innerRemoveDuplicateMessages(messages);
-    return result.toArray(new GlobalMessageSearchResult[result.size()]);
+    return result.toArray(new GlobalMessageSearchResult[0]);
   }
 
   protected LocalMessageSearchResult[] removeDuplicateMessages(
       final LocalMessageSearchResult[] messages) {
     final List<MessageSearchResult> result = innerRemoveDuplicateMessages(messages);
-    return result.toArray(new LocalMessageSearchResult[result.size()]);
+    return result.toArray(new LocalMessageSearchResult[0]);
   }
 
-  protected GlobalMessageSearchResult[] censorMessages(final GlobalMessageSearchResult[] messages)
-      throws ObjectNotFoundException, UnexpectedException {
+  protected GlobalMessageSearchResult[] redactMessages(final GlobalMessageSearchResult[] messages)
+      throws UnexpectedException {
     return (GlobalMessageSearchResult[])
         FilterUtils.applyFilter(
             messages,
-            new FilterUtils.Filter() {
-              @Override
-              public boolean include(final Object obj) throws UnexpectedException {
-                try {
-                  final GlobalMessageSearchResult gms = (GlobalMessageSearchResult) obj;
-                  return hasMessageReadPermissions(gms.getGlobalId())
-                      && !m_userContext.userMatchesFilter(
-                          gms.getAuthor().getId(), FilterFlags.MESSAGES);
-                } catch (final ObjectNotFoundException e) {
-                  // Not found? Certainly not to be included!
-                  //
-                  Logger.error(this, e);
-                  return false;
-                }
+            obj -> {
+              try {
+                final GlobalMessageSearchResult gms = (GlobalMessageSearchResult) obj;
+                return hasMessageReadPermissions(gms.getGlobalId())
+                    && !m_userContext.userMatchesFilter(
+                        gms.getAuthor().getId(), FilterFlags.MESSAGES);
+              } catch (final ObjectNotFoundException e) {
+                // Not found? Certainly not to be included!
+                //
+                LOG.error(e);
+                return false;
               }
             });
   }
 
-  protected NameAssociation[] censorNames(final NameAssociation[] names)
-      throws ObjectNotFoundException, UnexpectedException {
+  protected NameAssociation[] redactNames(final NameAssociation[] names)
+      throws UnexpectedException {
     return (NameAssociation[])
         FilterUtils.applyFilter(
             names,
-            new FilterUtils.Filter() {
-              @Override
-              public boolean include(final Object obj) throws UnexpectedException {
-                try {
-                  return isVisible(((NameAssociation) obj).getId());
-                } catch (final ObjectNotFoundException e) {
-                  // Not found? Certainly not visible!
-                  //
-                  Logger.error(this, e);
-                  return false;
-                }
+            obj -> {
+              try {
+                return isVisible(((NameAssociation) obj).getId());
+              } catch (final ObjectNotFoundException e) {
+                // Not found? Certainly not visible!
+                //
+                LOG.error(e);
+                return false;
               }
             });
   }
@@ -3926,7 +3894,7 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
         }
       }
     } catch (final Exception e) {
-      Logger.error(this, "Error in event handler", e);
+      LOG.error("Error in event handler", e);
       return false;
     }
   }
@@ -3944,13 +3912,12 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
         }
       }
     } catch (final Exception e) {
-      Logger.error(this, "Error in event handler", e);
+      LOG.error("Error in event handler", e);
       return false;
     }
   }
 
-  protected void innerMarkAsUnreadAtLogoutInCurrentConference(final int localnum)
-      throws UnexpectedException {
+  protected void innerMarkAsUnreadAtLogoutInCurrentConference(final int localnum) {
     m_pendingUnreads = new ReadLogItem(m_pendingUnreads, getCurrentConferenceId(), localnum);
   }
 
@@ -3960,16 +3927,14 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
           m_da.getMessageManager()
               .getMostRelevantOccurrence(getLoggedInUserId(), getCurrentConferenceId(), messageId);
       m_pendingUnreads = new ReadLogItem(m_pendingUnreads, occ.getConference(), occ.getLocalnum());
-    } catch (final SQLException e) {
-      throw new UnexpectedException(getLoggedInUserId(), e);
-    } catch (final ObjectNotFoundException e) {
+    } catch (final SQLException | ObjectNotFoundException e) {
       throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
 
   protected void saveUnreadMarkers() throws UnexpectedException {
     try {
-      final StringBuffer content = new StringBuffer();
+      final StringBuilder content = new StringBuilder();
       for (ReadLogItem each = m_pendingUnreads; each != null; each = each.getPrevious()) {
         content.append(each.externalizeToString());
         if (each.getPrevious() != null) {
@@ -4003,14 +3968,9 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
 
   public void applyUnreadMarkers() throws UnexpectedException {
     for (; m_pendingUnreads != null; m_pendingUnreads = m_pendingUnreads.getPrevious()) {
-      try {
-        m_userContext
-            .getMemberships()
-            .markAsUnread(m_pendingUnreads.getConference(), m_pendingUnreads.getLocalNum());
-      } catch (final ObjectNotFoundException e) {
-        // The conference or message was deleted. Just ignore
-        //
-      }
+      m_userContext
+          .getMemberships()
+          .markAsUnread(m_pendingUnreads.getConference(), m_pendingUnreads.getLocalNum());
     }
 
     // Delete backup file (if exists)
@@ -4099,12 +4059,10 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
       throws UnexpectedException {
     try {
       return removeDuplicateMessages(
-          censorMessages(
+          redactMessages(
               m_da.getMessageManager()
                   .listCommentsGloballyToAuthor(user, startDate, offset, length)));
     } catch (final SQLException e) {
-      throw new UnexpectedException(getLoggedInUserId(), e);
-    } catch (final ObjectNotFoundException e) {
       throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
@@ -4123,10 +4081,8 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
   @Override
   public NameAssociation[] findObjects(final String pattern) throws UnexpectedException {
     try {
-      return censorNames(m_da.getNameManager().findObjects(pattern));
+      return redactNames(m_da.getNameManager().findObjects(pattern));
     } catch (final SQLException e) {
-      throw new UnexpectedException(getLoggedInUserId(), e);
-    } catch (final ObjectNotFoundException e) {
       throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
@@ -4282,9 +4238,7 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
             id, MessageAttributes.EMAIL_RECEIVED, Long.toString(received.getTime()));
       }
       return occ;
-    } catch (final ObjectNotFoundException e) {
-      throw new UnexpectedException(getLoggedInUserId(), e);
-    } catch (final SQLException e) {
+    } catch (final ObjectNotFoundException | SQLException e) {
       throw new UnexpectedException(getLoggedInUserId(), e);
     }
   }
@@ -4350,8 +4304,8 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
     return (getLoggedInUser().getFlags1() & UserFlags.SELECT_YOUNGEST_FIRST) == 0;
   }
 
-  private static interface MessageOperation {
-    public void perform(long messageId) throws ObjectNotFoundException, UnexpectedException;
+  private interface MessageOperation {
+    void perform(long messageId) throws ObjectNotFoundException, UnexpectedException;
   }
 
   private abstract static class DeferredEvent {
@@ -4389,48 +4343,7 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
     }
   }
 
-  private class HeartbeatListenerImpl implements HeartbeatListener {
-    @Override
-    public void heartbeat() {
-      final ServerSessionImpl that = ServerSessionImpl.this;
-      final long now = System.currentTimeMillis();
-      if (now - that.m_lastHeartbeat > ServerSettings.getIdleNotificationThreashold()) {
-        final UserInfo ui = that.getLoggedInUserInEventHandler();
-        if (ui != null) {
-          that.m_sessions.broadcastEvent(
-              new UserAttendanceEvent(ui.getId(), ui.getName(), UserAttendanceEvent.AWOKE));
-        }
-      }
-      that.m_lastHeartbeat = System.currentTimeMillis();
-    }
-  }
-
-  private class MarkAsUnreadOperation implements MessageOperation {
-    @Override
-    public void perform(final long messageId) throws ObjectNotFoundException, UnexpectedException {
-      innerMarkAsUnreadAtLogout(messageId);
-    }
-  }
-
-  private class MarkAsReadOperation implements MessageOperation {
-    @Override
-    public void perform(final long messageId) throws ObjectNotFoundException, UnexpectedException {
-      final ServerSessionImpl that = ServerSessionImpl.this;
-      try {
-        final MessageManager mm = that.m_da.getMessageManager();
-        final MessageOccurrence[] mos =
-            mm.getVisibleOccurrences(that.getLoggedInUserId(), messageId);
-        for (int idx = 0; idx < mos.length; ++idx) {
-          final MessageOccurrence mo = mos[idx];
-          that.markMessageAsReadEx(mo.getConference(), mo.getLocalnum());
-        }
-      } catch (final SQLException e) {
-        throw new UnexpectedException(that.getLoggedInUserId(), e);
-      }
-    }
-  }
-
-  private class SortableMembershipInfo implements Comparable<SortableMembershipInfo> {
+  private static class SortableMembershipInfo implements Comparable<SortableMembershipInfo> {
     private final MembershipInfo m_mi;
     private final long m_parentCount;
 
@@ -4462,6 +4375,46 @@ public class ServerSessionImpl implements ServerSession, EventTarget, EventSourc
           : (getParentCount() > that.getParentCount()
               ? 1
               : (getPriority() < that.getPriority() ? -1 : 1));
+    }
+  }
+
+  private class HeartbeatListenerImpl implements HeartbeatListener {
+    @Override
+    public void heartbeat() {
+      final ServerSessionImpl that = ServerSessionImpl.this;
+      final long now = System.currentTimeMillis();
+      if (now - that.m_lastHeartbeat > ServerSettings.getIdleNotificationThreashold()) {
+        final UserInfo ui = that.getLoggedInUserInEventHandler();
+        if (ui != null) {
+          that.m_sessions.broadcastEvent(
+              new UserAttendanceEvent(ui.getId(), ui.getName(), UserAttendanceEvent.AWOKE));
+        }
+      }
+      that.m_lastHeartbeat = System.currentTimeMillis();
+    }
+  }
+
+  private class MarkAsUnreadOperation implements MessageOperation {
+    @Override
+    public void perform(final long messageId) throws UnexpectedException {
+      innerMarkAsUnreadAtLogout(messageId);
+    }
+  }
+
+  private class MarkAsReadOperation implements MessageOperation {
+    @Override
+    public void perform(final long messageId) throws ObjectNotFoundException, UnexpectedException {
+      final ServerSessionImpl that = ServerSessionImpl.this;
+      try {
+        final MessageManager mm = that.m_da.getMessageManager();
+        final MessageOccurrence[] mos =
+            mm.getVisibleOccurrences(that.getLoggedInUserId(), messageId);
+        for (final MessageOccurrence mo : mos) {
+          that.markMessageAsReadEx(mo.getConference(), mo.getLocalnum());
+        }
+      } catch (final SQLException e) {
+        throw new UnexpectedException(that.getLoggedInUserId(), e);
+      }
     }
   }
 }

@@ -12,7 +12,7 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
 
-/** @author <a href=mailto:jepson@xyzzy.se>Jepson</a> */
+/** @author Jepson */
 public class CompoundHashMap<K, V> {
   private final HashMap<K, V> keys;
   private final HashMap<V, K> values;

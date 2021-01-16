@@ -11,7 +11,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import nu.rydin.kom.frontend.text.ansi.ANSISequences;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class ANSIDisplayController implements DisplayController {
   private static Pattern PATTERN =
       Pattern.compile("(^[_*]|.*?\\s[_*])([^\\s^_^*]+)([_*]\\s.*|[_*]$)");

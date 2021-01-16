@@ -15,7 +15,7 @@ import nu.rydin.kom.frontend.text.Context;
 import nu.rydin.kom.frontend.text.parser.CommandLineParameter;
 import nu.rydin.kom.frontend.text.parser.IntegerParameter;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class KillSession extends AbstractCommand {
   public KillSession(Context context, String fullName, long permissions) {
     super(fullName, new CommandLineParameter[] {new IntegerParameter(true)}, permissions);

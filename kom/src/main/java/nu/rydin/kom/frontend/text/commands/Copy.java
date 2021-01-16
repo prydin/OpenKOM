@@ -26,8 +26,8 @@ import nu.rydin.kom.structs.MessageOccurrence;
 import nu.rydin.kom.structs.NameAssociation;
 
 /**
- * @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a>
- * @author <a href=mailto:jepson@xyzzy.se>Jepson</a>
+ * @author Pontus Rydin
+ * @author Jepson
  */
 public class Copy extends AbstractCommand {
   public Copy(Context context, String fullName, long permissions) {

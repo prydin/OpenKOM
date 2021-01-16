@@ -15,32 +15,38 @@ import nu.rydin.kom.exceptions.UnexpectedException;
 import nu.rydin.kom.frontend.text.Context;
 import nu.rydin.kom.frontend.text.LineEditor;
 import nu.rydin.kom.i18n.MessageFormatter;
-import nu.rydin.kom.utils.Logger;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /** @author Magnus Ihse Bursie (magnus@ihse.net) */
 public abstract class CommandLineParameter extends CommandLinePart {
 
+  private static final Logger LOG = LogManager.getLogger(CommandLineParameter.class);
   protected final String m_missingObjectQuestionKey;
   protected final boolean m_isRequired;
   protected final DefaultStrategy m_default;
 
   public CommandLineParameter(
-      String missingObjectQuestionKey, boolean isRequired, DefaultStrategy defaultS) {
+      final String missingObjectQuestionKey,
+      final boolean isRequired,
+      final DefaultStrategy defaultS) {
     m_missingObjectQuestionKey = missingObjectQuestionKey;
     m_isRequired = isRequired;
     m_default = defaultS;
   }
 
+  @Override
   public char getSeparator() {
     return ',';
   }
 
-  public Match fillInMissingObject(Context context)
+  @Override
+  public Match fillInMissingObject(final Context context)
       throws IOException, InterruptedException, OperationInterruptedException,
           InvalidChoiceException {
-    PrintWriter out = context.getOut();
-    LineEditor in = context.getIn();
-    MessageFormatter fmt = context.getMessageFormatter();
+    final PrintWriter out = context.getOut();
+    final LineEditor in = context.getIn();
+    final MessageFormatter fmt = context.getMessageFormatter();
     for (; ; ) {
       try {
         out.println();
@@ -50,32 +56,38 @@ public abstract class CommandLineParameter extends CommandLinePart {
         if (m_default != null) {
           try {
             defaultString = m_default.getDefault(context);
-          } catch (UnexpectedException e) {
+          } catch (final UnexpectedException e) {
             // Not being able to figure out the default is
             // not the end of the world, so we let this one slide.
             // However, we definitely want to log it!
             //
-            Logger.warn(this, e);
+            LOG.warn(e);
           }
         }
-        String line = in.readLine(defaultString);
-        if (line.length() == 0) throw new OperationInterruptedException();
-        Match newMatch = innerMatch(line, "");
+        final String line = in.readLine(defaultString);
+        if (line.length() == 0) {
+          throw new OperationInterruptedException();
+        }
+        final Match newMatch = innerMatch(line, "");
         return newMatch;
-      } catch (LineEditingDoneException e) {
+      } catch (final LineEditingDoneException e) {
         continue;
       }
     }
   }
 
+  @Override
   public boolean isRequired() {
     return m_isRequired;
   }
 
-  public String getUserDescription(Context context) {
-    MessageFormatter fmt = context.getMessageFormatter();
-    if (isRequired()) return "<" + fmt.format(getUserDescriptionKey()) + ">";
-    else return "[" + fmt.format(getUserDescriptionKey()) + "]";
+  public String getUserDescription(final Context context) {
+    final MessageFormatter fmt = context.getMessageFormatter();
+    if (isRequired()) {
+      return "<" + fmt.format(getUserDescriptionKey()) + ">";
+    } else {
+      return "[" + fmt.format(getUserDescriptionKey()) + "]";
+    }
   }
 
   protected abstract String getUserDescriptionKey();

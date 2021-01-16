@@ -9,7 +9,7 @@ package nu.rydin.kom.exceptions;
 import java.util.List;
 import nu.rydin.kom.structs.SessionListItem;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class AlreadyLoggedInException extends SystemException {
   static final long serialVersionUID = 2005;
 

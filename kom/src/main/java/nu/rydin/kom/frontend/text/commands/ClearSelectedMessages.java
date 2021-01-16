@@ -11,7 +11,7 @@ import nu.rydin.kom.exceptions.KOMException;
 import nu.rydin.kom.frontend.text.AbstractCommand;
 import nu.rydin.kom.frontend.text.Context;
 
-/** @author <a href=mailto:magnus.neck@abc.se>Magnus Neck</a> */
+/** @author Magnus Neck */
 public class ClearSelectedMessages extends AbstractCommand {
 
   public ClearSelectedMessages(Context context, String fullName, long permissions) {

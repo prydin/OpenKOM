@@ -12,7 +12,7 @@ import nu.rydin.kom.frontend.text.AbstractCommand;
 import nu.rydin.kom.frontend.text.ClientSession;
 import nu.rydin.kom.frontend.text.Context;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class Logout extends AbstractCommand {
   public Logout(Context context, String fullName, long permissions) {
     super(fullName, AbstractCommand.NO_PARAMETERS, permissions);

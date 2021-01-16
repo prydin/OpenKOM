@@ -13,7 +13,7 @@ import nu.rydin.kom.events.Event;
  * to be shut down immediately and that the receiving thread should immediatly clean up and
  * terminate.
  *
- * @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a>
+ * @author Pontus Rydin
  */
 public class SystemShutdownException extends UrgentEventException {
   static final long serialVersionUID = 2005;

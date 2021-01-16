@@ -14,7 +14,7 @@ import nu.rydin.kom.structs.MessageLocator;
  * <p>The "return type" for a TextNumberParameter is a TextNumber object.
  *
  * @author Magnus Ihse Bursie (magnus@ihse.net)
- * @author <a href=mailto:jepson@xyzzy.se>Jepson</a>
+ * @author Jepson
  */
 public class TextNumberParameter extends CommandLineParameter {
   public TextNumberParameter(String missingObjectQuestionKey, boolean isRequired) {

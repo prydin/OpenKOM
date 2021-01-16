@@ -9,8 +9,8 @@ package nu.rydin.kom.frontend.text.ansi;
 import java.text.MessageFormat;
 
 /**
- * @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a>
- * @author <a href=mailto:jepson@xyzzy.se>Jepson</a>
+ * @author Pontus Rydin
+ * @author Jepson
  */
 public class ANSISequences {
   public static final String CLEAR_DISPLAY = "\u001b[H\u001b[J";

@@ -9,7 +9,7 @@ package nu.rydin.kom.structs;
 import java.sql.Timestamp;
 import java.util.TimeZone;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class UserInfo extends NamedObject {
   public static final int ADDRESS1 = 0x00000001;
   public static final int ADDRESS2 = 0x00000002;

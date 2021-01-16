@@ -6,7 +6,7 @@
  */
 package nu.rydin.kom.frontend.text.editor;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public interface WordWrapperFactory {
   public WordWrapper create(String text, int width);
 

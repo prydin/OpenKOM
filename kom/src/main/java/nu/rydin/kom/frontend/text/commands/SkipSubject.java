@@ -12,7 +12,7 @@ import nu.rydin.kom.frontend.text.AbstractCommand;
 import nu.rydin.kom.frontend.text.Context;
 import nu.rydin.kom.i18n.MessageFormatter;
 
-/** @author <a href=mailto:jepson@xyzzy.se>Jepson</a> */
+/** @author Jepson */
 public class SkipSubject extends AbstractCommand {
   public SkipSubject(Context context, String fullname, long permissions) {
     super(fullname, AbstractCommand.NO_PARAMETERS, permissions);

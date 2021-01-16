@@ -22,7 +22,7 @@ public interface ServerSessionFactory {
    *
    * @param client The hostname/IP address of the client
    */
-  public void notifySuccessfulLogin(String client);
+  void notifySuccessfulLogin(String client);
 
   /**
    * Lets the server know we received a failed login from a client. This gives us a chance to
@@ -33,22 +33,22 @@ public interface ServerSessionFactory {
    * @param lockout The number of milliseconds from the last failed attempt a user is locked out
    *     once the maximum number of failed attempts is reached.
    */
-  public void notifyFailedLogin(String client, int limit, long lockout);
+  void notifyFailedLogin(String client, int limit, long lockout);
 
-  public boolean isBlacklisted(String client);
+  boolean isBlacklisted(String client);
 
   /**
    * Kills a session identified by a session if. Since we must allow this before a user has logged
    * in, the password is needed.
    *
-   * @param session The session id
+   * @param sessionId The session id
    * @param user The login id
    * @param password The password
    * @throws AuthenticationException
    * @throws UnexpectedException
    * @throws InterruptedException
    */
-  public void killSession(int sessionId, String user, String password)
+  void killSession(int sessionId, String user, String password)
       throws AuthenticationException, UnexpectedException, InterruptedException;
 
   /**
@@ -60,7 +60,7 @@ public interface ServerSessionFactory {
    * @throws UnexpectedException
    * @throws InterruptedException
    */
-  public void killSession(int session, String ticket)
+  void killSession(int session, String ticket)
       throws AuthenticationException, UnexpectedException, InterruptedException;
 
   /**
@@ -75,7 +75,7 @@ public interface ServerSessionFactory {
    * @throws AlreadyLoggedInException
    * @throws UnexpectedException
    */
-  public ServerSession login(String ticket, short clientType, boolean allowMulti)
+  ServerSession login(String ticket, short clientType, boolean allowMulti)
       throws AuthenticationException, LoginProhibitedException, AlreadyLoggedInException,
           UnexpectedException;
 
@@ -92,7 +92,7 @@ public interface ServerSessionFactory {
    * @throws AlreadyLoggedInException
    * @throws UnexpectedException
    */
-  public ServerSession login(String user, String password, short clientType, boolean allowMulti)
+  ServerSession login(String user, String password, short clientType, boolean allowMulti)
       throws AuthenticationException, LoginProhibitedException, AlreadyLoggedInException,
           UnexpectedException;
 
@@ -105,7 +105,7 @@ public interface ServerSessionFactory {
    * @throws AuthenticationException
    * @throws UnexpectedException
    */
-  public String generateTicket(String user, String password)
+  String generateTicket(String user, String password)
       throws AuthenticationException, UnexpectedException;
 
   /**
@@ -114,7 +114,7 @@ public interface ServerSessionFactory {
    * @param ticket The ticket
    * @throws AuthenticationException
    */
-  public void consumeTicket(String ticket) throws AuthenticationException;
+  void consumeTicket(String ticket) throws AuthenticationException;
 
   /**
    * Checks validity of a login ticket.
@@ -123,7 +123,7 @@ public interface ServerSessionFactory {
    * @return The id of the user
    * @throws AuthenticationException
    */
-  public long authenticate(String ticket) throws AuthenticationException;
+  long authenticate(String ticket) throws AuthenticationException;
 
   /**
    * Checks validity of a login id/password
@@ -134,7 +134,7 @@ public interface ServerSessionFactory {
    * @throws AuthenticationException
    * @throws UnexpectedException
    */
-  public long authenticate(String user, String password)
+  long authenticate(String user, String password)
       throws AuthenticationException, UnexpectedException;
 
   /**
@@ -142,7 +142,7 @@ public interface ServerSessionFactory {
    *
    * @return
    */
-  public boolean allowsSelfRegistration() throws UnexpectedException;
+  boolean allowsSelfRegistration() throws UnexpectedException;
 
   /**
    * Returns true if the specified login id exists. Note: This function works only if
@@ -152,7 +152,7 @@ public interface ServerSessionFactory {
    * @return
    * @throws AuthorizationException Self-registration is not allowed
    */
-  public boolean loginExits(String userid) throws AuthorizationException, UnexpectedException;
+  boolean loginExits(String userid) throws AuthorizationException, UnexpectedException;
 
   /**
    * Creates a self-registered user.
@@ -165,7 +165,7 @@ public interface ServerSessionFactory {
    * @throws AuthorizationException Self-registration is not allowed
    * @throws UnexpectedException
    */
-  public long selfRegister(String login, String password, String fullName, String charset)
+  long selfRegister(String login, String password, String fullName, String charset)
       throws AuthorizationException, UnexpectedException, AmbiguousNameException,
           DuplicateNameException;
 }

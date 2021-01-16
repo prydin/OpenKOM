@@ -16,7 +16,7 @@ import nu.rydin.kom.structs.NameAssociation;
 import nu.rydin.kom.utils.HeaderPrinter;
 import nu.rydin.kom.utils.PrintUtils;
 
-/** @author <a href=mailto:magnus.neck@abc.se>Magnus Neck</a> */
+/** @author Magnus Neck */
 public class MailboxMessageSearchResultPrinter implements MessageSearchResultPrinter {
 
   protected static final int LOCALID_COL_WIDTH = 7;

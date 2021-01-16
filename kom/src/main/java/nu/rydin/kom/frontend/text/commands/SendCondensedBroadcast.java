@@ -14,7 +14,7 @@ import nu.rydin.kom.frontend.text.Context;
 import nu.rydin.kom.frontend.text.parser.CommandLineParameter;
 import nu.rydin.kom.frontend.text.parser.RawParameter;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class SendCondensedBroadcast extends AbstractCommand {
 
   public SendCondensedBroadcast(Context context, String fullName, long permissions) {

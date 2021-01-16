@@ -16,7 +16,7 @@ import nu.rydin.kom.frontend.text.Context;
 import nu.rydin.kom.frontend.text.parser.CharacterSetParameter;
 import nu.rydin.kom.frontend.text.parser.CommandLineParameter;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class ChangeCharacterset extends AbstractCommand {
   public ChangeCharacterset(Context context, String fullName, long permissions) {
     super(

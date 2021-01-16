@@ -14,19 +14,21 @@ import nu.rydin.kom.exceptions.OutputInterruptedException;
 import nu.rydin.kom.exceptions.UserException;
 import nu.rydin.kom.frontend.text.parser.Parser;
 import nu.rydin.kom.frontend.text.parser.Parser.ExecutableCommand;
-import nu.rydin.kom.utils.Logger;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /** @author Pontus Rydin */
 public class Shell {
+  private static final Logger LOG = LogManager.getLogger(Shell.class);
   private final Parser parser;
 
-  public Shell(Parser parser) {
+  public Shell(final Parser parser) {
     this.parser = parser;
   }
 
-  public void run(Context context, String prompt) throws EscapeException {
-    LineEditor in = context.getIn();
-    KOMWriter out = context.getOut();
+  public void run(final Context context, final String prompt) throws EscapeException {
+    final LineEditor in = context.getIn();
+    final KOMWriter out = context.getOut();
     for (; ; ) {
       try {
         out.print(prompt);
@@ -42,46 +44,46 @@ public class Shell {
                   LineEditor.FLAG_ECHO
                       | LineEditor.FLAG_RECORD_HISTORY
                       | LineEditor.FLAG_ALLOW_HISTORY);
-        } catch (EventDeliveredException e) {
+        } catch (final EventDeliveredException e) {
           // Shouldn't happen
           //
           continue;
         }
 
         if (cmdString.trim().length() > 0) {
-          ExecutableCommand executableCommand = parser.parseCommandLine(context, cmdString);
+          final ExecutableCommand executableCommand = parser.parseCommandLine(context, cmdString);
           executableCommand.execute(context);
         }
-      } catch (OutputInterruptedException e) {
+      } catch (final OutputInterruptedException e) {
         out.println();
         out.println(e.formatMessage(context));
         out.println();
-      } catch (UserException e) {
+      } catch (final UserException e) {
         out.println();
         out.println(e.formatMessage(context));
         out.println();
-      } catch (EscapeException e) {
+      } catch (final EscapeException e) {
         // We're outta here...
         //
         throw e;
-      } catch (InterruptedException e) {
+      } catch (final InterruptedException e) {
         // SOMEONE SET UP US THE BOMB! Let's get out of here!
         // Can happen if connection is lost, or if an admin
         // requested shutdown.
         //
         return;
-      } catch (ImmediateShutdownException e) {
+      } catch (final ImmediateShutdownException e) {
         // SOMEONE SET UP US THE *BIG* BOMB!
         //
         return;
-      } catch (KOMRuntimeException e) {
+      } catch (final KOMRuntimeException e) {
         out.println(e.formatMessage(context));
         out.println();
-        Logger.error(this, e);
-      } catch (Exception e) {
+        LOG.error(e);
+      } catch (final Exception e) {
         e.printStackTrace(out);
         out.println();
-        Logger.error(this, e);
+        LOG.error(e);
       }
     }
   }

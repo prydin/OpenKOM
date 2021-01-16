@@ -15,7 +15,7 @@ import nu.rydin.kom.frontend.text.Context;
 import nu.rydin.kom.frontend.text.LineEditor;
 import nu.rydin.kom.i18n.MessageFormatter;
 
-/** @author <a href=mailto:jepson@xyzzy.se>Jepson</a> */
+/** @author Jepson */
 public class AutoPrioritizeConferences extends AbstractCommand {
   public AutoPrioritizeConferences(Context context, String fullName, long permissions) {
     super(fullName, AbstractCommand.NO_PARAMETERS, permissions);

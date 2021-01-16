@@ -21,7 +21,7 @@ import nu.rydin.kom.i18n.MessageFormatter;
 import nu.rydin.kom.structs.NameAssociation;
 import nu.rydin.kom.structs.UserInfo;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class ChangeContactInfo extends AbstractCommand {
 
   public ChangeContactInfo(Context context, String fullName, long permissions) {

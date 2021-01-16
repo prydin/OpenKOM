@@ -16,7 +16,7 @@ import nu.rydin.kom.frontend.text.parser.FilenameParameter;
 import nu.rydin.kom.frontend.text.parser.NamedObjectParameter;
 import nu.rydin.kom.structs.NameAssociation;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin </a> */
+/** @author Pontus Rydin  */
 public class DeleteFile extends AbstractCommand {
   public DeleteFile(Context context, String fullname, long permissions) {
     super(

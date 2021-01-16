@@ -11,7 +11,7 @@ import java.sql.Timestamp;
 import nu.rydin.kom.exceptions.KOMException;
 import nu.rydin.kom.frontend.text.Context;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class TimePeriodParameter extends FlagParameter {
   private static final int WEEK = 0;
   private static final int MONTH = 1;

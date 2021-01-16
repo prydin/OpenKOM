@@ -6,7 +6,7 @@
  */
 package nu.rydin.kom.constants;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class MessageLogKinds {
   /** Chat message sent to one or many specific recipients. */
   public static short CHAT = 0;

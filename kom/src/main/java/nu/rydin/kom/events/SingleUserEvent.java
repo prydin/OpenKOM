@@ -9,7 +9,7 @@ package nu.rydin.kom.events;
 /**
  * Base-class for events intended for a single user.
  *
- * @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a>
+ * @author Pontus Rydin
  */
 public abstract class SingleUserEvent extends Event {
   /** The user this event is intended for */

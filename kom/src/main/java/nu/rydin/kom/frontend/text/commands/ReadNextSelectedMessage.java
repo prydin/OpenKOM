@@ -10,7 +10,7 @@ import nu.rydin.kom.frontend.text.AbstractCommand;
 import nu.rydin.kom.frontend.text.Context;
 import nu.rydin.kom.structs.MessageLocator;
 
-/** @author <a href=mailto:magnus.neck@abc.se>Magnus Neck</a> */
+/** @author Magnus Neck */
 public class ReadNextSelectedMessage extends AbstractReadMessage {
   public ReadNextSelectedMessage(Context context, String fullName, long permissions) {
     super(fullName, AbstractCommand.NO_PARAMETERS, permissions, "read.next.selected.no.message");

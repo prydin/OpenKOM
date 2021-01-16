@@ -9,7 +9,7 @@ package nu.rydin.kom.frontend.text;
 import java.util.Map;
 import nu.rydin.kom.SystemSettings;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class ClientSettings {
   public static SystemSettings s_settings;
 

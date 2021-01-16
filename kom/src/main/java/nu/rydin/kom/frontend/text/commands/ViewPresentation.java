@@ -17,7 +17,7 @@ import nu.rydin.kom.frontend.text.parser.NamedObjectParameter;
 import nu.rydin.kom.i18n.MessageFormatter;
 import nu.rydin.kom.structs.NameAssociation;
 
-/** @author <a href=mailto:jepson@xyzzy.se>Jepson</a> */
+/** @author Jepson */
 public class ViewPresentation extends AbstractCommand {
   public ViewPresentation(Context context, String fullname, long permissions) {
     super(fullname, new CommandLineParameter[] {new NamedObjectParameter(true)}, permissions);

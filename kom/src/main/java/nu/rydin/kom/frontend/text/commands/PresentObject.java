@@ -19,7 +19,7 @@ import nu.rydin.kom.structs.MessageOccurrence;
 import nu.rydin.kom.structs.NameAssociation;
 import nu.rydin.kom.structs.UnstoredMessage;
 
-/** @author <a href=mailto:jepson@xyzzy.se>Jepson</a> */
+/** @author Jepson */
 public class PresentObject extends AbstractCommand {
   public PresentObject(Context context, String fullname, long permissions) {
     super(fullname, new CommandLineParameter[] {new NamedObjectParameter(true)}, permissions);

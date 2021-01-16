@@ -8,7 +8,7 @@ package nu.rydin.kom.frontend.text;
 
 import java.io.PrintWriter;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class DummyDisplayController implements DisplayController {
   private PrintWriter m_writer;
 

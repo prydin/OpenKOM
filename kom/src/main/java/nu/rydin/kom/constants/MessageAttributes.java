@@ -7,8 +7,8 @@
 package nu.rydin.kom.constants;
 
 /**
- * @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a>
- * @author <a href=mailto:jepson@xyzzy.se>Jepson</a>
+ * @author Pontus Rydin
+ * @author Jepson
  */
 public class MessageAttributes {
   /** "No comment" remark. Payload is user */

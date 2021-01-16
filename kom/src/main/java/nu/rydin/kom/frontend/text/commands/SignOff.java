@@ -23,7 +23,7 @@ import nu.rydin.kom.i18n.MessageFormatter;
 import nu.rydin.kom.structs.Name;
 import nu.rydin.kom.structs.NameAssociation;
 
-/** @author <a href=mailto:jepson@xyzzy.se>Jepson</a> */
+/** @author Jepson */
 public class SignOff extends AbstractCommand {
   public SignOff(Context context, String fullName, long permissions) {
     super(

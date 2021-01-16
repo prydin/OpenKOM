@@ -14,7 +14,7 @@ import nu.rydin.kom.frontend.text.parser.CommandLineParameter;
 import nu.rydin.kom.frontend.text.parser.RawParameter;
 import nu.rydin.kom.frontend.text.parser.StringParameter;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class CreateAlias extends AbstractCommand {
   public CreateAlias(Context context, String fullName, long permissions) {
     super(

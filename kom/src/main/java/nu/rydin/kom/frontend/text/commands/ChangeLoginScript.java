@@ -17,7 +17,7 @@ import nu.rydin.kom.frontend.text.editor.NonWrappingWrapper;
 import nu.rydin.kom.frontend.text.editor.simple.FileEditor;
 import nu.rydin.kom.i18n.MessageFormatter;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class ChangeLoginScript extends AbstractCommand {
   public ChangeLoginScript(Context context, String fullName, long permissions) {
     super(fullName, AbstractCommand.NO_PARAMETERS, permissions);

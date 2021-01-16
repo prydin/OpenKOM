@@ -22,83 +22,91 @@ import nu.rydin.kom.structs.MessageRange;
 import nu.rydin.kom.structs.MessageRangeList;
 
 /**
- * @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a>
- * @author <a href=mailto:jepson@xyzzy.se>Jepson</a>
+ * @author Pontus Rydin
+ * @author Jepson
  */
 public class MembershipList {
   /** Memberships keyed by conference */
-  private Map<Long, MembershipInfo> m_conferenceTable = new HashMap<Long, MembershipInfo>();
+  private final Map<Long, MembershipInfo> m_conferenceTable = new HashMap<>();
 
   /** Memberships in the order they are prioritized */
-  private MembershipInfo[] m_order;
+  private final MembershipInfo[] m_order;
 
   /** Memberships where the list of read messages has to be saved */
-  private Set<MembershipInfo> m_dirty = new HashSet<MembershipInfo>();
+  private final Set<MembershipInfo> m_dirty = new HashSet<>();
 
   /**
    * Creates a <tt>MembershipList</tt> based on an array or <tt>MembershipInfo</rr>
    *
    * @param memberships
    */
-  public MembershipList(MembershipInfo[] memberships) {
-    int top = memberships.length;
+  public MembershipList(final MembershipInfo[] memberships) {
+    final int top = memberships.length;
     m_order = new MembershipInfo[top];
     for (int idx = 0; idx < top; ++idx) {
-      MembershipInfo each = memberships[idx];
-      long conf = each.getConference();
+      final MembershipInfo each = memberships[idx];
+      final long conf = each.getConference();
       m_order[idx] = each;
       m_conferenceTable.put(conf, each);
     }
   }
 
-  public MembershipInfo getOrNull(long conference) throws ObjectNotFoundException {
-    return (MembershipInfo) m_conferenceTable.get(new Long(conference));
+  public MembershipInfo getOrNull(final long conference) {
+    return m_conferenceTable.get(conference);
   }
 
-  public MembershipInfo get(long conference) throws ObjectNotFoundException {
-    MembershipInfo mi = this.getOrNull(conference);
-    if (mi == null) throw new ObjectNotFoundException("Membership conference=" + conference);
+  public MembershipInfo get(final long conference) throws ObjectNotFoundException {
+    final MembershipInfo mi = getOrNull(conference);
+    if (mi == null) {
+      throw new ObjectNotFoundException("Membership conference=" + conference);
+    }
     return mi;
   }
 
-  public void markAsRead(long conference, int localnum) throws ObjectNotFoundException {
-    MembershipInfo mi = (MembershipInfo) m_conferenceTable.get(new Long(conference));
-    if (mi == null) return; // We're not members, so we don't care!
+  public void markAsRead(final long conference, final int localnum) {
+    final MembershipInfo mi = m_conferenceTable.get(conference);
+    if (mi == null) {
+      return; // We're not members, so we don't care!
+    }
 
     // Update ranges and mark as dirty
     //
-    MessageRangeList l = mi.getReadMessages();
+    final MessageRangeList l = mi.getReadMessages();
     mi.setReadMessages(
         l == null ? new MessageRangeList(new MessageRange(localnum, localnum)) : l.add(localnum));
     m_dirty.add(mi);
   }
 
-  public void markAsUnread(long conference, int localnum) throws ObjectNotFoundException {
-    MembershipInfo mi = (MembershipInfo) m_conferenceTable.get(new Long(conference));
-    if (mi == null) return; // We're not members, so we don't care!
+  public void markAsUnread(final long conference, final int localnum) {
+    final MembershipInfo mi = m_conferenceTable.get(conference);
+    if (mi == null) {
+      return; // We're not members, so we don't care!
+    }
 
     // Update ranges and mark as dirty
     //
-    MessageRangeList l = mi.getReadMessages();
+    final MessageRangeList l = mi.getReadMessages();
     mi.setReadMessages(l == null ? null : l.subtract(localnum));
     m_dirty.add(mi);
   }
 
-  public boolean markAsReadEx(long conference, int localnum) throws ObjectNotFoundException {
-    if (!this.isUnread(conference, localnum)) {
+  public boolean markAsReadEx(final long conference, final int localnum) throws ObjectNotFoundException {
+    if (!isUnread(conference, localnum)) {
       return false;
     } else {
-      this.markAsRead(conference, localnum);
+      markAsRead(conference, localnum);
       return true;
     }
   }
 
-  public synchronized int countUnread(long conference, ConferenceManager cm)
+  public synchronized int countUnread(final long conference, final ConferenceManager cm)
       throws ObjectNotFoundException, SQLException {
-    ConferenceInfo ci = cm.loadConference(conference);
-    MessageRange total = new MessageRange(ci.getFirstMessage(), ci.getLastMessage());
-    MembershipInfo mi = (MembershipInfo) m_conferenceTable.get(new Long(conference));
-    if (mi == null) return 0;
+    final ConferenceInfo ci = cm.loadConference(conference);
+    final MessageRange total = new MessageRange(ci.getFirstMessage(), ci.getLastMessage());
+    final MembershipInfo mi = m_conferenceTable.get(conference);
+    if (mi == null) {
+      return 0;
+    }
 
     // Check that the list of unread messages is fully contained
     // in the list of existing messages. If not, adjust!
@@ -113,41 +121,40 @@ public class MembershipList {
       mi.setReadMessages(read);
       m_dirty.add(mi);
     }
-    int answer = total.countOverlapping(read);
-    return answer;
+    return total.countOverlapping(read);
   }
 
-  public int getNextMessageInConference(long confId, ConferenceManager cm)
+  public int getNextMessageInConference(final long confId, final ConferenceManager cm)
       throws ObjectNotFoundException, SQLException {
-    MembershipInfo mi = this.get(confId);
-    ConferenceInfo ci = cm.loadConference(confId);
-    MessageRangeList mr = mi.getReadMessages();
-    int min = ci.getFirstMessage();
+    final MembershipInfo mi = get(confId);
+    final ConferenceInfo ci = cm.loadConference(confId);
+    final MessageRangeList mr = mi.getReadMessages();
+    final int min = ci.getFirstMessage();
     return mr == null ? (min != 0 ? min : -1) : mr.getFirstUnread(min, ci.getLastMessage());
   }
 
-  public boolean isUnread(long confId, int num) throws ObjectNotFoundException {
-    MembershipInfo mi = this.get(confId);
-    MessageRangeList mr = mi.getReadMessages();
+  public boolean isUnread(final long confId, final int num) throws ObjectNotFoundException {
+    final MembershipInfo mi = get(confId);
+    final MessageRangeList mr = mi.getReadMessages();
     return mr == null || !mr.includes(num);
   }
 
-  public void changeRead(long confId, int low, int high) throws ObjectNotFoundException {
-    MembershipInfo mi = this.get(confId);
+  public void changeRead(final long confId, final int low, final int high) throws ObjectNotFoundException {
+    final MembershipInfo mi = get(confId);
     mi.setReadMessages(new MessageRangeList(new MessageRange(low, high)));
     m_dirty.add(mi);
   }
 
-  public long getFirstConferenceWithUnreadMessages(ConferenceManager cm) throws SQLException {
+  public long getFirstConferenceWithUnreadMessages(final ConferenceManager cm) throws SQLException {
     return innerNextConferenceWithUnreadMessages(0, cm);
   }
 
-  public long getNextConferenceWithUnreadMessages(long startId, ConferenceManager cm)
+  public long getNextConferenceWithUnreadMessages(final long startId, final ConferenceManager cm)
       throws SQLException {
     // Find the first conference. Linear search. Believe me: It's
     // fast enough in this case.
     //
-    int top = m_order.length;
+    final int top = m_order.length;
 
     // If the first conference was not found, "offset" will remain at zero,
     // meaining that we start looking from the very first conference we're
@@ -165,18 +172,20 @@ public class MembershipList {
     return innerNextConferenceWithUnreadMessages(offset, cm);
   }
 
-  private long innerNextConferenceWithUnreadMessages(int startIndex, ConferenceManager cm)
+  private long innerNextConferenceWithUnreadMessages(final int startIndex, final ConferenceManager cm)
       throws SQLException {
     // Find the first conference with unread messages
     //
-    int top = m_order.length;
+    final int top = m_order.length;
     for (int idx = 0; idx < top; ++idx) {
-      MembershipInfo each = m_order[(idx + startIndex) % top];
-      long id = each.getConference();
+      final MembershipInfo each = m_order[(idx + startIndex) % top];
+      final long id = each.getConference();
 
       try {
-        if (this.countUnread(id, cm) > 0) return id;
-      } catch (ObjectNotFoundException e) {
+        if (countUnread(id, cm) > 0) {
+          return id;
+        }
+      } catch (final ObjectNotFoundException e) {
         // This conference could not be found. It's probably been
         // deleted, so just continue searching.
       }
@@ -187,12 +196,12 @@ public class MembershipList {
     return -1;
   }
 
-  public void save(long userId, MembershipManager mm) throws SQLException {
-    for (Iterator<MembershipInfo> itor = m_dirty.iterator(); itor.hasNext(); ) {
-      MembershipInfo each = itor.next();
+  public void save(final long userId, final MembershipManager mm) throws SQLException {
+    for (final Iterator<MembershipInfo> itor = m_dirty.iterator(); itor.hasNext(); ) {
+      final MembershipInfo each = itor.next();
       try {
         mm.updateMarkers(userId, each.getConference(), each.getReadMessages());
-      } catch (ObjectNotFoundException e) {
+      } catch (final ObjectNotFoundException e) {
         // TODO: This probably means that the conference has
         // been deleted. Should we try to do anything intelligent here?
       }
@@ -204,20 +213,21 @@ public class MembershipList {
     return m_order;
   }
 
-  public void printDebugInfo(PrintStream out) {
-    int top = m_order.length;
-    for (int idx = 0; idx < top; ++idx) {
-      MembershipInfo each = m_order[idx];
+  public void printDebugInfo(final PrintStream out) {
+    for (final MembershipInfo each : m_order) {
       out.println("Conf: " + each.getConference());
       out.print("Read markers:");
-      MessageRangeList markers = each.getReadMessages();
+      final MessageRangeList markers = each.getReadMessages();
       MessageRangeList rl = markers;
       while (rl != null) {
-        MessageRange r = rl.getRange();
+        final MessageRange r = rl.getRange();
         out.print(r.getMin() + "-" + r.getMax());
         rl = (MessageRangeList) rl.next();
-        if (rl != markers) out.print(", ");
-        else break;
+        if (rl != markers) {
+          out.print(", ");
+        } else {
+          break;
+        }
       }
       out.println();
       out.println();

@@ -21,7 +21,7 @@ import nu.rydin.kom.frontend.text.NamePicker;
 import nu.rydin.kom.structs.NameAssociation;
 import nu.rydin.kom.structs.UserListItem;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class ChatRececipientParameter extends NamedObjectParameter {
   public static final NameAssociation ALL_USERS =
       new NameAssociation(-1, "alla", NameManager.UNKNOWN_KIND);

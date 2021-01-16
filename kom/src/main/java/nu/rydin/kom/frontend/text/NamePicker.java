@@ -23,7 +23,7 @@ import nu.rydin.kom.frontend.text.parser.Parser;
 import nu.rydin.kom.structs.Name;
 import nu.rydin.kom.structs.NameAssociation;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin </a> */
+/** @author Pontus Rydin  */
 public class NamePicker {
   private static NameAssociation innerResolveName(String name, short kind, Context ctx)
       throws KOMException, UnexpectedException, IOException, InterruptedException,

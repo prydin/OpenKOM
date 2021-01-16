@@ -7,7 +7,7 @@
 package nu.rydin.kom.frontend.text.emulation;
 
 /**
- * @author <a href=mailto:jepson@xyzzy.se>Jepson</a>
+ * @author Jepson
  */
 
 import java.io.FileReader;

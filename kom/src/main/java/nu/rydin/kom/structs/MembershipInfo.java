@@ -9,7 +9,7 @@ package nu.rydin.kom.structs;
 import java.io.Serializable;
 import java.util.StringTokenizer;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class MembershipInfo implements Serializable {
   static final long serialVersionUID = 2005;
 

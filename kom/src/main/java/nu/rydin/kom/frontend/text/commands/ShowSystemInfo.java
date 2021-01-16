@@ -18,7 +18,7 @@ import nu.rydin.kom.structs.SystemInformation;
 import nu.rydin.kom.utils.HeaderPrinter;
 import nu.rydin.kom.utils.PrintUtils;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class ShowSystemInfo extends AbstractCommand {
   private static final int WIDTH = 25;
 

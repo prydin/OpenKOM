@@ -12,7 +12,7 @@ import nu.rydin.kom.frontend.text.parser.CommandLineParameter;
 import nu.rydin.kom.frontend.text.parser.UserParameter;
 import nu.rydin.kom.structs.NameAssociation;
 
-/** @author <a href=mailto:magnus.neck@abc.se>Magnus Neck</a> */
+/** @author Magnus Neck */
 public class SelectAndListGlobalMessage extends AbstractSelect {
 
   public SelectAndListGlobalMessage(Context context, String fullName, long permissions) {

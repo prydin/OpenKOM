@@ -9,7 +9,7 @@ package nu.rydin.kom.frontend.text.editor;
 import java.util.ArrayList;
 import java.util.Iterator;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class Buffer {
   private static class Line {
     public String m_content;

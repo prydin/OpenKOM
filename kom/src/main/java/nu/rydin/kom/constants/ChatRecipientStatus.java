@@ -9,7 +9,7 @@ package nu.rydin.kom.constants;
 /**
  * Status codes returned when verifying chat recipients.
  *
- * @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a>
+ * @author Pontus Rydin
  */
 public class ChatRecipientStatus {
   /** Recipient is a user that would receive the message ok. */

@@ -12,7 +12,7 @@ import nu.rydin.kom.structs.GlobalMessageSearchResult;
 import nu.rydin.kom.structs.LocalMessageSearchResult;
 import nu.rydin.kom.structs.MessageSearchResult;
 
-/** @author <a href=mailto:magnus.neck@abc.se>Magnus Neck</a> */
+/** @author Magnus Neck */
 public class MessageSearchResultPrinterFactory {
 
   public static MessageSearchResultPrinter createMessageSearchResultPrinter(

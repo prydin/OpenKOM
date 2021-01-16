@@ -20,7 +20,7 @@ import nu.rydin.kom.frontend.text.parser.CommandLineParameter;
 import nu.rydin.kom.frontend.text.parser.LineNumberParameter;
 import nu.rydin.kom.utils.PrintUtils;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class Change extends AbstractCommand {
   public Change(Context context, String fullName, long permissions) {
     super(fullName, new CommandLineParameter[] {new LineNumberParameter(true)}, permissions);

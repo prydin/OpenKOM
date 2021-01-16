@@ -14,7 +14,7 @@ import nu.rydin.kom.frontend.text.parser.UserParameter;
 import nu.rydin.kom.structs.NameAssociation;
 import nu.rydin.kom.utils.FlagUtils;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class ListFlags extends AbstractCommand {
   public ListFlags(Context context, String fullName, long permissions) {
     super(fullName, new CommandLineParameter[] {new UserParameter(false)}, permissions);

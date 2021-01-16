@@ -6,7 +6,7 @@
  */
 package nu.rydin.kom.frontend.text.parser;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class StringParameter extends CommandLineParameter {
   public StringParameter(String missingObjectQuestionKey, boolean isRequired) {
     super(missingObjectQuestionKey, isRequired, null);

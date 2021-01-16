@@ -17,7 +17,7 @@ import nu.rydin.kom.frontend.text.parser.CommandLineParameter;
 import nu.rydin.kom.frontend.text.parser.ConferenceParameter;
 import nu.rydin.kom.structs.NameAssociation;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class ChangeUserPresentationConference extends AbstractCommand {
   public ChangeUserPresentationConference(Context context, String fullName, long permissions) {
     super(fullName, new CommandLineParameter[] {new ConferenceParameter(true)}, permissions);

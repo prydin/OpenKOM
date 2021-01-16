@@ -6,7 +6,7 @@
  */
 package nu.rydin.kom.events;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public interface ClientEventTarget extends EventTarget {
   public void onEvent(TicketDeliveredEvent event);
 }

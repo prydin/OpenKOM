@@ -6,7 +6,7 @@
  */
 package nu.rydin.kom.constants;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class ConferencePermissions {
   public static final int READ_PERMISSION = 0x0001;
   public static final int WRITE_PERMISSION = 0x0002;

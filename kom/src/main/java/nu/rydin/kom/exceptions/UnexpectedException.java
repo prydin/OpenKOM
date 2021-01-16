@@ -6,23 +6,28 @@
  */
 package nu.rydin.kom.exceptions;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class UnexpectedException extends SystemException {
   static final long serialVersionUID = 2005;
 
-  private long m_user;
+  private final long user;
 
-  public UnexpectedException(long user, Throwable t) {
+  public UnexpectedException(final long user, final Throwable t) {
     super(t);
-    m_user = user;
+    this.user = user;
   }
 
-  public UnexpectedException(long user, String msg, Throwable t) {
+  public UnexpectedException(final long user, final String msg, final Throwable t) {
     super(msg, t);
-    m_user = user;
+    this.user = user;
+  }
+
+  public UnexpectedException(final long user, final String msg) {
+    super(msg);
+    this.user = user;
   }
 
   public long getUser() {
-    return m_user;
+    return user;
   }
 }

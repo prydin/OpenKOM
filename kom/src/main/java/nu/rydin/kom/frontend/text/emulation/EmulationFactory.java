@@ -10,7 +10,7 @@ import java.util.HashMap;
 import java.util.ResourceBundle;
 import nu.rydin.kom.exceptions.GenericException;
 /**
- * @author <a href=mailto:jepson@xyzzy.se>Jepson</a>
+ * @author Jepson
  */
 
 public class EmulationFactory 

@@ -16,7 +16,7 @@ import nu.rydin.kom.i18n.MessageFormatter;
 import nu.rydin.kom.structs.MessageLocator;
 import nu.rydin.kom.structs.NameAssociation;
 
-/** @author <a href=mailto:jepson@xyzzy.se>Jepson</a> */
+/** @author Jepson */
 public class ListReaders extends AbstractCommand {
   public ListReaders(Context context, String fullName, long permissions) {
     super(fullName, new CommandLineParameter[] {new LocalTextNumberParameter(false)}, permissions);

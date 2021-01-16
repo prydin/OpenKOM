@@ -23,7 +23,7 @@ import nu.rydin.kom.structs.Name;
 import nu.rydin.kom.structs.NameAssociation;
 import nu.rydin.kom.structs.UserInfo;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public interface Context extends TerminalSettingsProvider {
   /** Returns the <tt>Reader</tt> handling user input */
   public LineEditor getIn();

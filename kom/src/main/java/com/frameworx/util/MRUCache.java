@@ -25,7 +25,7 @@ import java.util.Set;
  * some action when a value is discarded from the cache, eihter because it expired, or it had to be
  * discarded to make room for a new value.
  *
- * @author <a href="mailto:pontus.rydin@frameworx.com">Pontus Rydin</a>
+ * @author Pontus Rydin
  */
 public class MRUCache implements Map {
   /** Default eviction policy taking no action */

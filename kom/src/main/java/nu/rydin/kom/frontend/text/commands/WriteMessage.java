@@ -19,7 +19,7 @@ import nu.rydin.kom.structs.MessageOccurrence;
 import nu.rydin.kom.structs.NameAssociation;
 import nu.rydin.kom.structs.UnstoredMessage;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin </a> */
+/** @author Pontus Rydin  */
 public class WriteMessage extends AbstractCommand {
   public WriteMessage(Context context, String fullName, long permissions) {
     super(fullName, AbstractCommand.NO_PARAMETERS, permissions);

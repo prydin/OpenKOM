@@ -9,7 +9,7 @@ package nu.rydin.kom.modules;
 import java.util.Map;
 import nu.rydin.kom.exceptions.ModuleException;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public interface Module {
   /**
    * Starts the module and any background threads associated with it

@@ -12,7 +12,7 @@ import nu.rydin.kom.structs.Envelope;
 /**
  * Interfaces to classes capable of formatting and printing messages from a conference.
  *
- * @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a>
+ * @author Pontus Rydin
  */
 public interface MessagePrinter {
   public void printMessage(Context context, Envelope envelope) throws KOMException;

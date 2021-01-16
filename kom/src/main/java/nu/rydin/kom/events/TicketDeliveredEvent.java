@@ -6,7 +6,7 @@
  */
 package nu.rydin.kom.events;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class TicketDeliveredEvent extends ClientEvent {
   private final String m_ticket;
 

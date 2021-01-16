@@ -8,7 +8,7 @@ package nu.rydin.kom.events;
 
 import nu.rydin.kom.structs.Name;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class ChatMessageEvent extends SingleUserEvent {
   private final Name m_user;
 

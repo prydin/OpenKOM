@@ -17,8 +17,8 @@ import nu.rydin.kom.structs.MembershipListItem;
 import nu.rydin.kom.structs.NameAssociation;
 
 /**
- * @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a>
- * @author <a href=mailto:jepson@xyzzy.se>Jepson</a>
+ * @author Pontus Rydin
+ * @author Jepson
  */
 public class ListNews extends AbstractCommand {
   public ListNews(Context context, String fullName, long permissions) {

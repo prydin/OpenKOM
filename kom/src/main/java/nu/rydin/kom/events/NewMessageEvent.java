@@ -9,7 +9,7 @@ package nu.rydin.kom.events;
 /**
  * Event send when a new message is available.
  *
- * @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a>
+ * @author Pontus Rydin
  */
 public class NewMessageEvent extends Event {
   private long m_conferenceId;

@@ -16,7 +16,7 @@ import nu.rydin.kom.frontend.text.parser.CommandLineParameter;
 import nu.rydin.kom.frontend.text.parser.TextNumberParameter;
 import nu.rydin.kom.structs.MessageLocator;
 
-/** @author <a href=mailto:jepson@xyzzy.se>Jepson</a> */
+/** @author Jepson */
 public class SelectTree extends AbstractCommand {
   public SelectTree(Context context, String fullName, long permissions) {
     super(fullName, new CommandLineParameter[] {new TextNumberParameter(false)}, permissions);

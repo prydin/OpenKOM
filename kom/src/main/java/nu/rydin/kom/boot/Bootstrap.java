@@ -16,13 +16,15 @@ import nu.rydin.kom.exceptions.ModuleException;
 import nu.rydin.kom.exceptions.NoSuchModuleException;
 import nu.rydin.kom.modules.Module;
 import nu.rydin.kom.modules.Modules;
-import nu.rydin.kom.utils.Logger;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.xml.sax.InputSource;
 import org.xml.sax.SAXException;
 import org.xml.sax.XMLReader;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class Bootstrap {
+  private static final Logger LOG = LogManager.getLogger(Bootstrap.class);
   private static final long s_bootTime = System.currentTimeMillis();
 
   static {
@@ -31,47 +33,51 @@ public class Bootstrap {
     TimeZone.setDefault(TimeZone.getTimeZone("UTC"));
   }
 
-  private String configFile;
+  private final String configFile;
 
-  public Bootstrap(String configFile) {
+  public Bootstrap(final String configFile) {
     this.configFile = configFile;
   }
 
-  // private Map m_modules;
-
   public static long getBootTime() {
-    return s_bootTime;
+    return Bootstrap.s_bootTime;
+  }
+
+  public static void main(final String[] args) {
+    // First and only arg is path module config file, or null
+    //
+    final String config = args.length > 0 ? args[0] : null;
+    final Bootstrap me = new Bootstrap(config);
+    try {
+      me.run();
+    } catch (final Throwable t) {
+      LOG.error("Unhandled exception", t);
+    }
   }
 
   public void start() throws IOException, ParserConfigurationException, SAXException {
     // Load class names
     //
-    ModuleDefinition[] definitions = this.loadModuleList();
-    int top = definitions.length;
-    for (int idx = 0; idx < top; ++idx) {
-      ModuleDefinition each = definitions[idx];
-      Logger.info(this, "Starting server " + each.getName());
+    final ModuleDefinition[] definitions = loadModuleList();
+    for (final ModuleDefinition each : definitions) {
+      LOG.info("Starting server " + each.getName());
       try {
-        Module module = each.newInstance();
+        final Module module = each.newInstance();
         module.start(each.getParameters());
         Modules.registerModule(each.getName(), module);
-      } catch (ClassNotFoundException e) {
-        Logger.error(this, "Error locating server class " + each.getName(), e);
-      } catch (InstantiationException e) {
-        Logger.error(this, "Error creating instance of server class " + each.getName(), e);
-      } catch (IllegalAccessException e) {
-        Logger.error(this, "Error creating instance of server class " + each.getName(), e);
-      } catch (ModuleException e) {
-        Logger.error(this, "Error creating instance of server class " + each.getName(), e);
+      } catch (final ClassNotFoundException e) {
+        LOG.error("Error locating server class " + each.getName(), e);
+      } catch (final InstantiationException | ModuleException | IllegalAccessException e) {
+        LOG.error("Error creating instance of server class " + each.getName(), e);
       }
     }
   }
 
   public void join() throws InterruptedException {
-    for (String moduleName : Modules.listModuleNames()) {
+    for (final String moduleName : Modules.listModuleNames()) {
       try {
         Modules.getModule(moduleName).join();
-      } catch (NoSuchModuleException e) {
+      } catch (final NoSuchModuleException e) {
         // Just skip
       }
     }
@@ -81,36 +87,21 @@ public class Bootstrap {
       throws InterruptedException, IOException, ParserConfigurationException, SAXException {
     // Start everything and wait for the world (as we know it) to end
     //
-    this.start();
-    this.join();
-  }
-
-  public static void main(String[] args) {
-    // First and only arg is path module config file, or null
-    //
-    String config = args.length > 0 ? args[0] : null;
-    Bootstrap me = new Bootstrap(config);
-    try {
-      me.run();
-    } catch (Throwable t) {
-      Logger.error(me, t);
-    }
+    start();
+    join();
   }
 
   protected ModuleDefinition[] loadModuleList()
       throws IOException, SAXException, ParserConfigurationException {
-    ModuleDefinitionHandler mh = new ModuleDefinitionHandler();
+    final ModuleDefinitionHandler mh = new ModuleDefinitionHandler();
 
-    XMLReader xr = SAXParserFactory.newInstance().newSAXParser().getXMLReader();
+    final XMLReader xr = SAXParserFactory.newInstance().newSAXParser().getXMLReader();
     xr.setContentHandler(mh);
-    InputStream configInput =
+    try (final InputStream configInput =
         configFile == null
             ? ClassLoader.getSystemClassLoader().getResourceAsStream("modules.xml")
-            : new FileInputStream(configFile);
-    try {
+            : new FileInputStream(configFile)) {
       xr.parse(new InputSource(configInput));
-    } finally {
-      configInput.close();
     }
     return mh.getModuleDefinitions();
   }

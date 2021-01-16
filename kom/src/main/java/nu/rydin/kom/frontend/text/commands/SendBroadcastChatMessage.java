@@ -28,7 +28,7 @@ import nu.rydin.kom.structs.NameAssociation;
 
 /**
  * @author Henrik Schr�der
- * @author <a href=mailto:jepson@xyzzy.se>Jepson</a>
+ * @author Jepson
  */
 public class SendBroadcastChatMessage extends AbstractCommand {
 

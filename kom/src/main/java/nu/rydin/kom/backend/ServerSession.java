@@ -57,18 +57,24 @@ import nu.rydin.kom.structs.UserListItem;
 import nu.rydin.kom.structs.UserLogItem;
 
 /**
- * @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a>
- * @author <a href=mailto:jepson@xyzzy.se>Jepson</a>
+ * @author Pontus Rydin
+ * @author Jepson
  */
 public interface ServerSession {
   /** Returns the unique session id */
-  public int getSessionId();
+  int getSessionId();
 
   /** Returns <tt>true</tt> if this session is valid */
-  public boolean isValid();
+  boolean isValid();
 
   /** Returns the type of client that created us */
-  public short getClientType();
+  short getClientType();
+
+  /** Returns information about the current conference */
+  ConferenceInfo getCurrentConference();
+
+  /** Returns the id of the current conference */
+  long getCurrentConferenceId();
 
   /**
    * Changes the current conference.
@@ -77,23 +83,16 @@ public interface ServerSession {
    * @throws UnexpectedException
    * @throws ObjectNotFoundException
    */
-  public abstract void setCurrentConferenceId(long id)
-      throws UnexpectedException, ObjectNotFoundException;
-
-  /** Returns information about the current conference */
-  public abstract ConferenceInfo getCurrentConference();
-
-  /** Returns the id of the current conference */
-  public abstract long getCurrentConferenceId();
+  void setCurrentConferenceId(long id) throws UnexpectedException, ObjectNotFoundException;
 
   /** Returns information about the user currently logged on */
-  public abstract UserInfo getLoggedInUser();
+  UserInfo getLoggedInUser();
 
   /** Returns the id of the user currently logged on */
-  public abstract long getLoggedInUserId();
+  long getLoggedInUserId();
 
   /** Returns the system time when the current user logged in */
-  public abstract long getLoginTime();
+  long getLoginTime();
 
   /**
    * Returns the session state, i.e. suggested action, a "focused" conference and number of unread
@@ -101,7 +100,7 @@ public interface ServerSession {
    *
    * @throws UnexpectedException
    */
-  public abstract SessionState getSessionState() throws UnexpectedException;
+  SessionState getSessionState() throws UnexpectedException;
 
   /**
    * Checks for permissions in a conference and throws an <tt>AuthorizationException</tt> if the
@@ -113,7 +112,7 @@ public interface ServerSession {
    * @throws ObjectNotFoundException
    * @throws UnexpectedException
    */
-  public void assertConferencePermission(long conferenceId, int mask)
+  void assertConferencePermission(long conferenceId, int mask)
       throws AuthorizationException, ObjectNotFoundException, UnexpectedException;
 
   /**
@@ -126,7 +125,7 @@ public interface ServerSession {
    * @throws ObjectNotFoundException
    * @throws UnexpectedException
    */
-  public void assertModifyConference(long conferenceId)
+  void assertModifyConference(long conferenceId)
       throws AuthorizationException, ObjectNotFoundException, UnexpectedException;
 
   /**
@@ -135,7 +134,7 @@ public interface ServerSession {
    * @param pattern The pattern
    * @throws UnexpectedException
    */
-  public NameAssociation[] getAssociationsForPattern(String pattern) throws UnexpectedException;
+  NameAssociation[] getAssociationsForPattern(String pattern) throws UnexpectedException;
 
   /**
    * Returns name associations of a certain kind based on a pattern.
@@ -144,7 +143,7 @@ public interface ServerSession {
    * @param kind The kind (conference or user)
    * @throws UnexpectedException
    */
-  public NameAssociation[] getAssociationsForPatternAndKind(String pattern, short kind)
+  NameAssociation[] getAssociationsForPatternAndKind(String pattern, short kind)
       throws UnexpectedException;
 
   /**
@@ -154,7 +153,7 @@ public interface ServerSession {
    * @throws ObjectNotFoundException
    * @throws UnexpectedException
    */
-  public int countUnread(long conference) throws ObjectNotFoundException, UnexpectedException;
+  int countUnread(long conference) throws ObjectNotFoundException, UnexpectedException;
 
   /**
    * Re-read the last read message.
@@ -164,7 +163,7 @@ public interface ServerSession {
    * @throws NoCurrentMessageException
    * @throws AuthorizationException
    */
-  public Envelope readLastMessage()
+  Envelope readLastMessage()
       throws ObjectNotFoundException, NoCurrentMessageException, UnexpectedException,
           AuthorizationException;
 
@@ -175,32 +174,9 @@ public interface ServerSession {
    * @return
    * @throws AuthorizationException
    */
-  public Envelope readMessage(MessageLocator message)
+  Envelope readMessage(MessageLocator message)
       throws ObjectNotFoundException, UnexpectedException, NoCurrentMessageException,
           AuthorizationException;
-
-  /**
-   * Retrievs a message and marks it as unread
-   *
-   * @param localnum Local number in the current conference
-   * @return
-   * @throws ObjectNotFoundException
-   * @throws UnexpectedException
-   */
-  //	public Envelope readLocalMessage(int localnum)
-  //	throws ObjectNotFoundException, UnexpectedException;
-
-  /**
-   * Retrievs a message and marks it as unread
-   *
-   * @param conf Id of the conference
-   * @param localnum Local number in conference
-   * @throws ObjectNotFoundException
-   * @throws UnexpectedException
-   */
-  //	public Envelope readLocalMessage(long conf, int localnum)
-  //	throws ObjectNotFoundException, UnexpectedException;
-
   /**
    * Retrieves the next unread message in the specified conference and marks it as read
    *
@@ -210,7 +186,7 @@ public interface ServerSession {
    * @throws UnexpectedException
    * @throws AuthorizationException
    */
-  public Envelope readNextMessage(long conf)
+  Envelope readNextMessage(long conf)
       throws NoMoreMessagesException, ObjectNotFoundException, UnexpectedException,
           AuthorizationException;
 
@@ -222,7 +198,7 @@ public interface ServerSession {
    * @throws UnexpectedException
    * @throws AuthorizationException
    */
-  public Envelope readNextMessageInCurrentConference()
+  Envelope readNextMessageInCurrentConference()
       throws NoMoreMessagesException, ObjectNotFoundException, UnexpectedException,
           AuthorizationException;
 
@@ -234,7 +210,7 @@ public interface ServerSession {
    * @throws UnexpectedException
    * @throws AuthorizationException
    */
-  public Envelope readNextReply()
+  Envelope readNextReply()
       throws NoMoreMessagesException, ObjectNotFoundException, UnexpectedException,
           AuthorizationException;
 
@@ -252,7 +228,7 @@ public interface ServerSession {
    * @throws AmbiguousNameException
    * @throws DuplicateNameException
    */
-  public long createConference(
+  long createConference(
       String fullname,
       String keywords,
       int permissions,
@@ -267,14 +243,14 @@ public interface ServerSession {
    *
    * @throws UnexpectedException
    */
-  public ConferenceListItem[] listConferencesByDate() throws UnexpectedException;
+  ConferenceListItem[] listConferencesByDate() throws UnexpectedException;
 
   /**
    * Returns a list of conferences, sorted by their normalized name.
    *
    * @throws UnexpectedException
    */
-  public ConferenceListItem[] listConferencesByName() throws UnexpectedException;
+  ConferenceListItem[] listConferencesByName() throws UnexpectedException;
 
   /**
    * Creates a new user.
@@ -302,7 +278,7 @@ public interface ServerSession {
    * @throws DuplicateNameException
    * @throws AuthorizationException
    */
-  public void createUser(
+  void createUser(
       String userid,
       String password,
       String fullname,
@@ -332,7 +308,7 @@ public interface ServerSession {
    * @throws ObjectNotFoundException
    * @throws UnexpectedException
    */
-  public void changeContactInfo(UserInfo ui)
+  void changeContactInfo(UserInfo ui)
       throws ObjectNotFoundException, UnexpectedException, AuthorizationException;
 
   /**
@@ -343,7 +319,7 @@ public interface ServerSession {
    * @throws ObjectNotFoundException
    * @throws NotMemberException
    */
-  public void gotoConference(long id)
+  void gotoConference(long id)
       throws UnexpectedException, ObjectNotFoundException, NotMemberException;
 
   /**
@@ -352,7 +328,7 @@ public interface ServerSession {
    * @throws NoMoreNewsException
    * @throws UnexpectedException
    */
-  public long gotoNextConference() throws NoMoreNewsException, UnexpectedException;
+  long gotoNextConference() throws NoMoreNewsException, UnexpectedException;
 
   /**
    * Stores a message in a conference
@@ -364,7 +340,7 @@ public interface ServerSession {
    * @throws AuthorizationException
    * @throws UnexpectedException
    */
-  public MessageOccurrence storeMessage(long conf, UnstoredMessage msg)
+  MessageOccurrence storeMessage(long conf, UnstoredMessage msg)
       throws ObjectNotFoundException, AuthorizationException, UnexpectedException;
 
   /**
@@ -378,7 +354,7 @@ public interface ServerSession {
    * @throws UnexpectedException
    * @throws AuthorizationException
    */
-  public MessageOccurrence storeMail(long recipient, UnstoredMessage msg)
+  MessageOccurrence storeMail(long recipient, UnstoredMessage msg)
       throws ObjectNotFoundException, UnexpectedException, AuthorizationException;
 
   /**
@@ -392,7 +368,7 @@ public interface ServerSession {
    * @throws UnexpectedException
    * @throws AuthorizationException
    */
-  public MessageOccurrence storeReplyAsMessage(
+  MessageOccurrence storeReplyAsMessage(
       long conference, UnstoredMessage msg, MessageLocator replyTo)
       throws ObjectNotFoundException, UnexpectedException, AuthorizationException,
           NoCurrentMessageException;
@@ -409,8 +385,7 @@ public interface ServerSession {
    * @throws UnexpectedException
    * @throws AuthorizationException
    */
-  public MessageOccurrence storeReplyAsMail(
-      long recipient, UnstoredMessage msg, MessageLocator replyTo)
+  MessageOccurrence storeReplyAsMail(long recipient, UnstoredMessage msg, MessageLocator replyTo)
       throws ObjectNotFoundException, UnexpectedException, NoCurrentMessageException,
           AuthorizationException;
 
@@ -423,7 +398,7 @@ public interface ServerSession {
    * @throws UnexpectedException
    * @throws AuthorizationException
    */
-  public MessageOccurrence storePresentation(UnstoredMessage msg, long object)
+  MessageOccurrence storePresentation(UnstoredMessage msg, long object)
       throws UnexpectedException, AuthorizationException, ObjectNotFoundException;
 
   /**
@@ -436,29 +411,17 @@ public interface ServerSession {
    * @throws ObjectNotFoundException
    * @throws AuthorizationException
    */
-  public Envelope readTaggedMessage(short tag, long object)
+  Envelope readTaggedMessage(short tag, long object)
       throws UnexpectedException, ObjectNotFoundException, AuthorizationException;
 
   /**
    * Stores a "no comment" to the given message
    *
    * @param message Global message id of the message not commented
-   * @return
    */
-  public void storeNoComment(MessageLocator message)
+  void storeNoComment(MessageLocator message)
       throws AuthorizationException, NoCurrentMessageException, ObjectNotFoundException,
           UnexpectedException;
-
-  /**
-   * Reads a message identified by a global message id.
-   *
-   * @param globalId The global message id
-   * @throws ObjectNotFoundException
-   * @throws AuthorizationException
-   * @throws UnexpectedException
-   */
-  // public Envelope readGlobalMessage(long globalId)
-  // throws ObjectNotFoundException, AuthorizationException, UnexpectedException;
 
   /**
    * Reads the "original message" of the current message, i.e. the message to which it is a reply
@@ -468,7 +431,7 @@ public interface ServerSession {
    * @throws ObjectNotFoundException
    * @throws UnexpectedException
    */
-  public Envelope readOriginalMessage()
+  Envelope readOriginalMessage()
       throws NoCurrentMessageException, NotAReplyException, ObjectNotFoundException,
           AuthorizationException, UnexpectedException;
 
@@ -481,7 +444,7 @@ public interface ServerSession {
    * @throws ObjectNotFoundException
    * @throws UnexpectedException
    */
-  public MessageOccurrence globalToLocalInConference(long conferenceId, long globalNum)
+  MessageOccurrence globalToLocalInConference(long conferenceId, long globalNum)
       throws ObjectNotFoundException, UnexpectedException;
 
   /**
@@ -492,7 +455,7 @@ public interface ServerSession {
    * @throws ObjectNotFoundException
    * @throws UnexpectedException
    */
-  public MessageOccurrence globalToLocal(long globalNum)
+  MessageOccurrence globalToLocal(long globalNum)
       throws ObjectNotFoundException, UnexpectedException;
 
   /**
@@ -503,7 +466,7 @@ public interface ServerSession {
    * @throws ObjectNotFoundException
    * @throws UnexpectedException
    */
-  public long localToGlobal(long conference, int localNum)
+  long localToGlobal(long conference, int localNum)
       throws ObjectNotFoundException, UnexpectedException;
 
   /**
@@ -516,7 +479,7 @@ public interface ServerSession {
    * @throws NoCurrentMessageException
    * @throws UnexpectedException
    */
-  public MessageLocator resolveLocator(MessageLocator message)
+  MessageLocator resolveLocator(MessageLocator message)
       throws ObjectNotFoundException, NoCurrentMessageException, UnexpectedException;
 
   /**
@@ -525,7 +488,7 @@ public interface ServerSession {
    * @param localNum
    * @return
    */
-  public long localToGlobalInCurrentConference(int localNum)
+  long localToGlobalInCurrentConference(int localNum)
       throws ObjectNotFoundException, UnexpectedException;
 
   /**
@@ -537,7 +500,7 @@ public interface ServerSession {
    * @throws ObjectNotFoundException
    * @throws UnexpectedException
    */
-  public long getGlobalMessageId(MessageLocator textnumber)
+  long getGlobalMessageId(MessageLocator textnumber)
       throws ObjectNotFoundException, NoCurrentMessageException, UnexpectedException;
 
   /**
@@ -545,7 +508,7 @@ public interface ServerSession {
    *
    * @throws NoCurrentMessageException
    */
-  public long getCurrentMessage() throws NoCurrentMessageException;
+  long getCurrentMessage() throws NoCurrentMessageException;
 
   /**
    * Returns the thread ID for the message.
@@ -554,7 +517,7 @@ public interface ServerSession {
    * @throws MessageNotFoundException
    * @throws UnexpectedException
    */
-  public long getThreadIdForMessage(MessageLocator ml)
+  long getThreadIdForMessage(MessageLocator ml)
       throws MessageNotFoundException, UnexpectedException;
 
   /**
@@ -564,7 +527,7 @@ public interface ServerSession {
    * @throws NoCurrentMessageException
    * @throws UnexpectedException
    */
-  public MessageOccurrence getCurrentMessageOccurrence()
+  MessageOccurrence getCurrentMessageOccurrence()
       throws NoCurrentMessageException, UnexpectedException;
 
   /**
@@ -576,7 +539,7 @@ public interface ServerSession {
    * @throws ObjectNotFoundException
    * @throws UnexpectedException
    */
-  public MessageOccurrence getMostRelevantOccurrence(long conferenceId, long messageId)
+  MessageOccurrence getMostRelevantOccurrence(long conferenceId, long messageId)
       throws ObjectNotFoundException, UnexpectedException;
 
   /**
@@ -589,7 +552,7 @@ public interface ServerSession {
    * @throws ObjectNotFoundException
    * @throws UnexpectedException
    */
-  public MessageOccurrence getOriginalMessageOccurrence(long messageId)
+  MessageOccurrence getOriginalMessageOccurrence(long messageId)
       throws ObjectNotFoundException, UnexpectedException;
 
   /**
@@ -601,7 +564,7 @@ public interface ServerSession {
    * @throws AlreadyMemberException
    * @throws UnexpectedException
    */
-  public Name signup(long conferenceId)
+  Name signup(long conferenceId)
       throws ObjectNotFoundException, AlreadyMemberException, UnexpectedException,
           AuthorizationException;
 
@@ -611,7 +574,7 @@ public interface ServerSession {
    * @return A list of all conferences the user signed up for
    * @throws UnexpectedException
    */
-  public Name[] signupForAllConferences() throws UnexpectedException, ObjectNotFoundException;
+  Name[] signupForAllConferences() throws UnexpectedException, ObjectNotFoundException;
 
   /**
    * Signs off from a conference.
@@ -622,7 +585,7 @@ public interface ServerSession {
    * @throws UnexpectedException
    * @throws NotMemberException
    */
-  public Name signoff(long conferenceId)
+  Name signoff(long conferenceId)
       throws ObjectNotFoundException, UnexpectedException, NotMemberException;
 
   /**
@@ -631,9 +594,8 @@ public interface ServerSession {
    * @return The number of conferences signed off from.
    * @throws ObjectNotFoundException
    * @throws UnexpectedException
-   * @throws NotMemberException
    */
-  public int signoffAllConferences() throws ObjectNotFoundException, UnexpectedException;
+  int signoffAllConferences() throws ObjectNotFoundException, UnexpectedException;
 
   /**
    * Re-prioritizes conferences for the current user, placing the given conference at the position
@@ -647,16 +609,15 @@ public interface ServerSession {
    * @throws UnexpectedException
    * @throws NotMemberException
    */
-  public long prioritizeConference(long conference, long targetconference)
+  long prioritizeConference(long conference, long targetconference)
       throws ObjectNotFoundException, UnexpectedException, NotMemberException;
 
   /**
    * Re-prioritizes all of the current user's conferences.
    *
-   * @see ServerSessionImpl.SortableMembershipInfo.compareTo()
    * @throws UnexpectedException
    */
-  public void autoPrioritizeConferences() throws UnexpectedException;
+  void autoPrioritizeConferences() throws UnexpectedException;
 
   /**
    * Returns a user record based on a global id
@@ -665,7 +626,7 @@ public interface ServerSession {
    * @throws ObjectNotFoundException
    * @throws UnexpectedException
    */
-  public UserInfo getUser(long userId) throws ObjectNotFoundException, UnexpectedException;
+  UserInfo getUser(long userId) throws ObjectNotFoundException, UnexpectedException;
 
   /**
    * Returns a conference record based on a global id
@@ -674,7 +635,7 @@ public interface ServerSession {
    * @throws ObjectNotFoundException
    * @throws UnexpectedException
    */
-  public ConferenceInfo getConference(long conferenceId)
+  ConferenceInfo getConference(long conferenceId)
       throws ObjectNotFoundException, UnexpectedException;
 
   /**
@@ -684,14 +645,14 @@ public interface ServerSession {
    * @throws ObjectNotFoundException
    * @throws UnexpectedException
    */
-  public NamedObject getNamedObject(long id) throws ObjectNotFoundException, UnexpectedException;
+  NamedObject getNamedObject(long id) throws ObjectNotFoundException, UnexpectedException;
 
   /**
    * Finds objects based on partial match on name or keywords.
    *
    * @param pattern The search pattern
    */
-  public NameAssociation[] findObjects(String pattern) throws UnexpectedException;
+  NameAssociation[] findObjects(String pattern) throws UnexpectedException;
 
   /**
    * Changes keywords of an object
@@ -702,19 +663,19 @@ public interface ServerSession {
    * @throws ObjectNotFoundException
    * @throws AuthorizationException
    */
-  public void changeKeywords(long id, String keywords)
+  void changeKeywords(long id, String keywords)
       throws UnexpectedException, ObjectNotFoundException, AuthorizationException;
 
   /**
    * Changes email alias of an object
    *
    * @param id The id of the object to change
-   * @param keywords The new email alias
+   * @param emailAlias The new email alias
    * @throws UnexpectedException
    * @throws ObjectNotFoundException
    * @throws AuthorizationException
    */
-  public void changeEmailAlias(long id, String emailAlias)
+  void changeEmailAlias(long id, String emailAlias)
       throws UnexpectedException, ObjectNotFoundException, AuthorizationException;
 
   /**
@@ -724,7 +685,7 @@ public interface ServerSession {
    * @throws ObjectNotFoundException If the user could not be found
    * @throws UnexpectedException
    */
-  public NameAssociation[] listMemberships(long userId)
+  NameAssociation[] listMemberships(long userId)
       throws ObjectNotFoundException, UnexpectedException;
 
   /**
@@ -735,7 +696,7 @@ public interface ServerSession {
    * @throws ObjectNotFoundException
    * @throws UnexpectedException
    */
-  public MembershipInfo[] listConferenceMembers(long confId)
+  MembershipInfo[] listConferenceMembers(long confId)
       throws ObjectNotFoundException, UnexpectedException;
 
   /**
@@ -746,7 +707,7 @@ public interface ServerSession {
    * @throws ObjectNotFoundException
    * @throws UnexpectedException
    */
-  public NameAssociation[] listMembersByConference(long confId)
+  NameAssociation[] listMembersByConference(long confId)
       throws ObjectNotFoundException, UnexpectedException;
 
   /**
@@ -756,7 +717,7 @@ public interface ServerSession {
    * @throws ObjectNotFoundException
    * @throws UnexpectedException
    */
-  public Name getName(long id) throws ObjectNotFoundException, UnexpectedException;
+  Name getName(long id) throws ObjectNotFoundException, UnexpectedException;
 
   /**
    * Gets the names of a set of <tt>NamedObject</tt> by their ids.
@@ -765,7 +726,7 @@ public interface ServerSession {
    * @throws ObjectNotFoundException
    * @throws UnexpectedException
    */
-  public Name[] getNames(long[] id) throws ObjectNotFoundException, UnexpectedException;
+  Name[] getNames(long[] id) throws ObjectNotFoundException, UnexpectedException;
 
   /**
    * Marks all messages in a thread as unread
@@ -774,7 +735,7 @@ public interface ServerSession {
    * @return The number of messages marked as unread
    * @throws UnexpectedException
    */
-  public int markThreadAsUnread(long root) throws ObjectNotFoundException, UnexpectedException;
+  int markThreadAsUnread(long root) throws ObjectNotFoundException, UnexpectedException;
 
   /**
    * Marks all messages in a thread as unread
@@ -784,7 +745,7 @@ public interface ServerSession {
    * @return The number of messages marked as unread
    * @throws UnexpectedException
    */
-  public int markThreadAsUnread(long root, boolean immediate)
+  int markThreadAsUnread(long root, boolean immediate)
       throws ObjectNotFoundException, UnexpectedException, NoCurrentMessageException;
 
   /**
@@ -795,7 +756,7 @@ public interface ServerSession {
    * @throws ObjectNotFoundException
    * @throws UnexpectedException
    */
-  public int markSubjectAsUnread(String subject, boolean localOnly)
+  int markSubjectAsUnread(String subject, boolean localOnly)
       throws ObjectNotFoundException, UnexpectedException;
 
   /**
@@ -807,16 +768,16 @@ public interface ServerSession {
    * @throws ObjectNotFoundException
    * @throws UnexpectedException
    */
-  public int markSubjectAsUnread(String subject, boolean localOnly, boolean immediate)
+  int markSubjectAsUnread(String subject, boolean localOnly, boolean immediate)
       throws ObjectNotFoundException, UnexpectedException;
 
   /**
    * Queues up a message to be marked as unread at logout.
    *
-   * @param The message (null for current message)
+   * @param message The message (null for current message)
    * @throws UnexpectedException
    */
-  public void markAsUnreadAtLogout(MessageLocator message)
+  void markAsUnreadAtLogout(MessageLocator message)
       throws UnexpectedException, NoCurrentMessageException, ObjectNotFoundException;
 
   /**
@@ -827,7 +788,7 @@ public interface ServerSession {
    * @throws ObjectNotFoundException
    * @throws UnexpectedException
    */
-  public void changeUnread(int nUnread) throws ObjectNotFoundException, UnexpectedException;
+  void changeUnread(int nUnread) throws ObjectNotFoundException, UnexpectedException;
 
   /**
    * Changes the number of unread messages in the given conference. Destroys the previous interval
@@ -838,7 +799,7 @@ public interface ServerSession {
    * @throws ObjectNotFoundException
    * @throws UnexpectedException
    */
-  public void changeUnread(int nUnread, long conference)
+  void changeUnread(int nUnread, long conference)
       throws ObjectNotFoundException, UnexpectedException;
 
   /**
@@ -848,8 +809,7 @@ public interface ServerSession {
    * @throws ObjectNotFoundException
    * @throws UnexpectedException
    */
-  public void changeUnreadInAllConfs(int nUnread)
-      throws ObjectNotFoundException, UnexpectedException;
+  void changeUnreadInAllConfs(int nUnread) throws ObjectNotFoundException, UnexpectedException;
 
   /**
    * Rolls back the <i>n</i> latest reads, marking the read messages as unread. If n > the total
@@ -859,14 +819,14 @@ public interface ServerSession {
    * @return Number of messages actually processed
    * @throws UnexpectedException
    */
-  public int rollbackReads(int n) throws UnexpectedException;
+  int rollbackReads(int n) throws UnexpectedException;
 
   /**
    * List conferences containing unread messages
    *
    * @throws UnexpectedException
    */
-  public MembershipListItem[] listNews() throws UnexpectedException;
+  MembershipListItem[] listNews() throws UnexpectedException;
 
   /**
    * List unread texts for the given user.
@@ -874,38 +834,38 @@ public interface ServerSession {
    * @param userId User ID.
    * @throws UnexpectedException
    */
-  public MembershipListItem[] listNewsFor(long userId) throws UnexpectedException;
+  MembershipListItem[] listNewsFor(long userId) throws UnexpectedException;
   /**
    * Returns an array of <tt>UserListItems</tt> with the user currently logged in.
    *
    * @return
    */
-  public UserListItem[] listLoggedInUsers() throws UnexpectedException;
+  UserListItem[] listLoggedInUsers() throws UnexpectedException;
 
   /**
    * Returns true if the given user currently has an active session.
    *
    * @param userId User ID.
    */
-  public boolean hasSession(long userId);
+  boolean hasSession(long userId);
 
   /**
    * Returns the <tt>EventSource</tt> i.e. an object returning event objects when they are ready to
    * be picked up.
    */
-  public EventSource getEventSource();
+  EventSource getEventSource();
 
   /**
    * Sends a chat message to multiple recipients (users and conferences).
    *
    * @param destinations The intended message destinations
    * @param message The message
-   * @param logAsMulticas 'true' if message should be logged as multicas (i.e. message to everyone
+   * @param logAsMulticast 'true' if message should be logged as multicas (i.e. message to everyone
    *     in a conference)
    * @return An array of NameAssociations of users that refused the message
    */
-  public NameAssociation[] sendMulticastMessage(
-      long destinations[], String message, boolean logAsMulticast)
+  NameAssociation[] sendMulticastMessage(
+      long[] destinations, String message, boolean logAsMulticast)
       throws NotLoggedInException, ObjectNotFoundException, AllRecipientsNotReachedException,
           UnexpectedException;
 
@@ -918,7 +878,7 @@ public interface ServerSession {
    * @throws ObjectNotFoundException
    * @throws UnexpectedException
    */
-  public int[] verifyChatRecipients(long recepipents[])
+  int[] verifyChatRecipients(long[] recepipents)
       throws ObjectNotFoundException, UnexpectedException;
 
   /**
@@ -928,18 +888,17 @@ public interface ServerSession {
    * @param kind The message kind
    * @return An array of NameAssociations of users that refused the message
    */
-  public NameAssociation[] broadcastChatMessage(String message, short kind)
-      throws UnexpectedException;
+  NameAssociation[] broadcastChatMessage(String message, short kind) throws UnexpectedException;
 
   /**
    * Posts an event to the session-private event queue. Not intended to be called by client code.
    *
    * @param e The event
    */
-  public void postEvent(Event e);
+  void postEvent(Event e);
 
   /** Shuts down this session */
-  public abstract void close() throws UnexpectedException;
+  void close() throws UnexpectedException;
 
   /**
    * Detaches a server session from any frontends it may be attached to, but keeps the session
@@ -947,15 +906,15 @@ public interface ServerSession {
    *
    * @throws UnexpectedException
    */
-  public abstract void detach() throws UnexpectedException;
+  void detach() throws UnexpectedException;
 
   /**
    * Persistently updates the character set setting for the current user
    *
-   * @param charsetname of the new character set
+   * @param charset of the new character set
    * @throws UnexpectedException
    */
-  public void updateCharacterset(String charset) throws UnexpectedException;
+  void updateCharacterset(String charset) throws UnexpectedException;
 
   /**
    * Persistently updates the time zone setting of the current user.
@@ -963,7 +922,7 @@ public interface ServerSession {
    * @param timeZone The new time zone
    * @throws UnexpectedException
    */
-  public void updateTimeZone(String timeZone) throws UnexpectedException;
+  void updateTimeZone(String timeZone) throws UnexpectedException;
 
   /**
    * Changes the permissions of a user in a conference
@@ -973,8 +932,7 @@ public interface ServerSession {
    * @param permissions The permission bitmap
    * @throws UnexpectedException
    */
-  public void setConferencePermissions(long conf, long user, int permissions)
-      throws UnexpectedException;
+  void setConferencePermissions(long conf, long user, int permissions) throws UnexpectedException;
 
   /**
    * Sets the permissions of a user in the current conference
@@ -983,7 +941,7 @@ public interface ServerSession {
    * @param permissions
    * @throws UnexpectedException
    */
-  public void setConferencePermissionsInCurrentConference(long user, int permissions)
+  void setConferencePermissionsInCurrentConference(long user, int permissions)
       throws UnexpectedException;
 
   /**
@@ -993,7 +951,7 @@ public interface ServerSession {
    * @param user The id of the user
    * @throws UnexpectedException
    */
-  public void revokeConferencePermissions(long conf, long user) throws UnexpectedException;
+  void revokeConferencePermissions(long conf, long user) throws UnexpectedException;
 
   /**
    * Revokes all permissions from a user in the current conference
@@ -1001,7 +959,7 @@ public interface ServerSession {
    * @param user The id of the user
    * @throws UnexpectedException
    */
-  public void revokeConferencePermissionsInCurrentConference(long user) throws UnexpectedException;
+  void revokeConferencePermissionsInCurrentConference(long user) throws UnexpectedException;
 
   /**
    * Lists all users with permissions in the specified conference, along with their permission bits.
@@ -1009,15 +967,14 @@ public interface ServerSession {
    * @param conf The id of the conference
    * @throws UnexpectedException
    */
-  public ConferencePermission[] listConferencePermissions(long conf) throws UnexpectedException;
+  ConferencePermission[] listConferencePermissions(long conf) throws UnexpectedException;
 
   /**
    * Lists all users with permissions in the current conference, along with their permission bits.
    *
    * @throws UnexpectedException
    */
-  public ConferencePermission[] listConferencePermissionsInCurrentConference()
-      throws UnexpectedException;
+  ConferencePermission[] listConferencePermissionsInCurrentConference() throws UnexpectedException;
 
   /**
    * Returns the permissions mask in effect for the logged in user in the specified conference
@@ -1026,7 +983,7 @@ public interface ServerSession {
    * @throws UnexpectedException
    * @throws ObjectNotFoundException
    */
-  public int getPermissionsInConference(long conferenceId)
+  int getPermissionsInConference(long conferenceId)
       throws UnexpectedException, ObjectNotFoundException;
 
   /**
@@ -1037,7 +994,7 @@ public interface ServerSession {
    * @throws UnexpectedException
    * @throws ObjectNotFoundException
    */
-  public int getUserPermissionsInConference(long userId, long conferenceId)
+  int getUserPermissionsInConference(long userId, long conferenceId)
       throws UnexpectedException, ObjectNotFoundException;
 
   /**
@@ -1046,8 +1003,7 @@ public interface ServerSession {
    * @throws UnexpectedException
    * @throws ObjectNotFoundException
    */
-  public int getPermissionsInCurrentConference()
-      throws UnexpectedException, ObjectNotFoundException;
+  int getPermissionsInCurrentConference() throws UnexpectedException, ObjectNotFoundException;
 
   /**
    * Checks if the currently logged on user has the permissions in the specified conference.
@@ -1058,7 +1014,7 @@ public interface ServerSession {
    * @throws AuthorizationException
    * @throws ObjectNotFoundException
    */
-  public boolean hasPermissionInConference(long conferenceId, int mask)
+  boolean hasPermissionInConference(long conferenceId, int mask)
       throws AuthorizationException, ObjectNotFoundException, UnexpectedException;
 
   /**
@@ -1069,7 +1025,7 @@ public interface ServerSession {
    * @throws AuthorizationException
    * @throws ObjectNotFoundException
    */
-  public boolean hasPermissionInCurrentConference(int mask)
+  boolean hasPermissionInCurrentConference(int mask)
       throws AuthorizationException, ObjectNotFoundException, UnexpectedException;
 
   /**
@@ -1079,7 +1035,7 @@ public interface ServerSession {
    * @param mask The required permiessions
    * @throws AuthorizationException
    */
-  public void checkRights(long mask) throws AuthorizationException;
+  void checkRights(long mask) throws AuthorizationException;
 
   /**
    * Checks if a user with a certain userid exists.
@@ -1087,7 +1043,7 @@ public interface ServerSession {
    * @param userid The userid to check for
    * @return <tt>true</tt> if the user exists
    */
-  public boolean checkForUserid(String userid) throws UnexpectedException;
+  boolean checkForUserid(String userid) throws UnexpectedException;
 
   /**
    * Change reply-to conference.
@@ -1098,7 +1054,7 @@ public interface ServerSession {
    * @throws ObjectNotFoundException
    * @throws UnexpectedException
    */
-  public void changeReplyToConference(long originalConferenceId, long newReplyToConferenceId)
+  void changeReplyToConference(long originalConferenceId, long newReplyToConferenceId)
       throws AuthorizationException, ObjectNotFoundException, UnexpectedException;
 
   /**
@@ -1108,7 +1064,7 @@ public interface ServerSession {
    * @param globalNum Global message number to copy
    * @param conferenceId Id of conference to copy to
    */
-  public void copyMessage(long globalNum, long conferenceId)
+  void copyMessage(long globalNum, long conferenceId)
       throws AuthorizationException, ObjectNotFoundException, UnexpectedException;
 
   /**
@@ -1123,7 +1079,7 @@ public interface ServerSession {
    * @throws ObjectNotFoundException
    * @throws UnexpectedException
    */
-  public void moveMessage(long messageId, long destConfId)
+  void moveMessage(long messageId, long destConfId)
       throws AuthorizationException, ObjectNotFoundException, UnexpectedException;
 
   /**
@@ -1136,7 +1092,7 @@ public interface ServerSession {
    * @throws ObjectNotFoundException
    * @throws UnexpectedException
    */
-  public void deleteMessage(int localNum, long conference)
+  void deleteMessage(int localNum, long conference)
       throws AuthorizationException, ObjectNotFoundException, UnexpectedException;
 
   /**
@@ -1148,7 +1104,7 @@ public interface ServerSession {
    * @throws ObjectNotFoundException
    * @throws UnexpectedException
    */
-  public void deleteMessageInCurrentConference(int localNum)
+  void deleteMessageInCurrentConference(int localNum)
       throws AuthorizationException, ObjectNotFoundException, UnexpectedException;
 
   /**
@@ -1161,7 +1117,7 @@ public interface ServerSession {
    * @throws UnexpectedException
    * @throws AuthorizationException
    */
-  public void addMessageAttribute(long message, short attribute, String payload, boolean deleteOld)
+  void addMessageAttribute(long message, short attribute, String payload, boolean deleteOld)
       throws UnexpectedException, AuthorizationException;
 
   /**
@@ -1171,7 +1127,7 @@ public interface ServerSession {
    * @return
    * @throws UnexpectedException
    */
-  public MessageAttribute[] getMessageAttributes(long message) throws UnexpectedException;
+  MessageAttribute[] getMessageAttributes(long message) throws UnexpectedException;
 
   /**
    * Returns the message attributes of the supplied type associated with the given message.
@@ -1181,7 +1137,7 @@ public interface ServerSession {
    * @return
    * @throws UnexpectedException
    */
-  public MessageAttribute[] getMatchingMessageAttributes(long message, short kind)
+  MessageAttribute[] getMatchingMessageAttributes(long message, short kind)
       throws UnexpectedException;
 
   /**
@@ -1189,7 +1145,7 @@ public interface ServerSession {
    *
    * @return
    */
-  public String getDebugString();
+  String getDebugString();
 
   /**
    * Renames an object
@@ -1200,7 +1156,7 @@ public interface ServerSession {
    * @throws ObjectNotFoundException
    * @throws UnexpectedException
    */
-  public void renameObject(long id, String newName)
+  void renameObject(long id, String newName)
       throws DuplicateNameException, ObjectNotFoundException, AuthorizationException,
           UnexpectedException;
 
@@ -1213,7 +1169,7 @@ public interface ServerSession {
    * @throws AuthorizationException
    * @throws UnexpectedException
    */
-  public void changeSuffixOfLoggedInUser(String suffix)
+  void changeSuffixOfLoggedInUser(String suffix)
       throws DuplicateNameException, ObjectNotFoundException, AuthorizationException,
           UnexpectedException;
 
@@ -1227,7 +1183,7 @@ public interface ServerSession {
    * @throws AuthorizationException
    * @throws UnexpectedException
    */
-  public void changeSuffixOfUser(long id, String suffix)
+  void changeSuffixOfUser(long id, String suffix)
       throws DuplicateNameException, ObjectNotFoundException, AuthorizationException,
           UnexpectedException;
 
@@ -1238,7 +1194,7 @@ public interface ServerSession {
    * @throws DuplicateNameException
    * @throws UnexpectedException
    */
-  public boolean userCanChangeNameOf(long id) throws DuplicateNameException, UnexpectedException;
+  boolean userCanChangeNameOf(long id) throws DuplicateNameException, UnexpectedException;
 
   /**
    * Returns the if the current user can manipulate an object, e.g. change the presentation of it or
@@ -1248,8 +1204,7 @@ public interface ServerSession {
    * @throws ObjectNotFoundException
    * @throws UnexpectedException
    */
-  public boolean canManipulateObject(long object)
-      throws ObjectNotFoundException, UnexpectedException;
+  boolean canManipulateObject(long object) throws ObjectNotFoundException, UnexpectedException;
 
   /**
    * Updates conference permissions and visibility
@@ -1262,7 +1217,7 @@ public interface ServerSession {
    * @throws AuthorizationException
    * @throws UnexpectedException
    */
-  public void updateConferencePermissions(
+  void updateConferencePermissions(
       long id, int permissions, int nonmemberpermissions, short visibility)
       throws ObjectNotFoundException, AuthorizationException, UnexpectedException;
 
@@ -1273,7 +1228,7 @@ public interface ServerSession {
    * @param oldPassword The old password. Not checked if the caller holds the USER_ADMIN privilege.
    * @param newPassword The new password
    */
-  public void changePassword(long userId, String oldPassword, String newPassword)
+  void changePassword(long userId, String oldPassword, String newPassword)
       throws ObjectNotFoundException, AuthorizationException, UnexpectedException,
           BadPasswordException;
 
@@ -1283,7 +1238,7 @@ public interface ServerSession {
    * @param set The flags to set
    * @param reset The flags to reset
    */
-  public void changeUserFlags(long[] set, long[] reset)
+  void changeUserFlags(long[] set, long[] reset)
       throws ObjectNotFoundException, UnexpectedException;
 
   /**
@@ -1293,7 +1248,7 @@ public interface ServerSession {
    * @param set The permissions to set
    * @param reset The permissions to reset
    */
-  public void changeUserPermissions(long user, long set, long reset)
+  void changeUserPermissions(long user, long set, long reset)
       throws ObjectNotFoundException, AuthorizationException, UnexpectedException;
 
   /**
@@ -1305,7 +1260,7 @@ public interface ServerSession {
    * @return An array of LocalMessageSearchResults
    * @throws UnexpectedException
    */
-  public LocalMessageSearchResult[] listAllMessagesLocally(long conference, int start, int length)
+  LocalMessageSearchResult[] listAllMessagesLocally(long conference, int start, int length)
       throws UnexpectedException;
 
   /**
@@ -1315,7 +1270,7 @@ public interface ServerSession {
    * @return The number of messages
    * @throws UnexpectedException
    */
-  public long countAllMessagesLocally(long conference)
+  long countAllMessagesLocally(long conference)
       throws UnexpectedException, AuthorizationException, ObjectNotFoundException;
 
   /**
@@ -1327,7 +1282,7 @@ public interface ServerSession {
    * @return An array of LocalMessageSearchResults
    * @throws UnexpectedException
    */
-  public LocalMessageSearchResult[] listMessagesLocallyByAuthor(
+  LocalMessageSearchResult[] listMessagesLocallyByAuthor(
       long conference, long user, int start, int length) throws UnexpectedException;
 
   /**
@@ -1337,8 +1292,7 @@ public interface ServerSession {
    * @return True if selection is complete, false if incomplete
    * @throws UnexpectedException
    */
-  public boolean selectMessagesLocallyByAuthor(long conference, long user)
-      throws UnexpectedException;
+  boolean selectMessagesLocallyByAuthor(long conference, long user) throws UnexpectedException;
 
   /**
    * Returns the approximate number of messages in the given conference written by the given user.
@@ -1348,7 +1302,7 @@ public interface ServerSession {
    * @throws UnexpectedException
    * @throws ObjectNotFoundException
    */
-  public long countMessagesLocallyByAuthor(long conference, long user)
+  long countMessagesLocallyByAuthor(long conference, long user)
       throws UnexpectedException, AuthorizationException, ObjectNotFoundException;
 
   /**
@@ -1360,7 +1314,7 @@ public interface ServerSession {
    * @return An array of GlobalMessageSearchResults
    * @throws UnexpectedException
    */
-  public GlobalMessageSearchResult[] listMessagesGloballyByAuthor(long user, int offset, int length)
+  GlobalMessageSearchResult[] listMessagesGloballyByAuthor(long user, int offset, int length)
       throws UnexpectedException;
 
   /**
@@ -1370,7 +1324,7 @@ public interface ServerSession {
    * @return True if selection is complete, false if incomplete
    * @throws UnexpectedException
    */
-  public boolean selectMessagesGloballyByAuthor(long user) throws UnexpectedException;
+  boolean selectMessagesGloballyByAuthor(long user) throws UnexpectedException;
 
   /**
    * Returns the approximate number of messages written by a certain user. Counts only messages in
@@ -1379,7 +1333,7 @@ public interface ServerSession {
    * @param user The user
    * @throws UnexpectedException
    */
-  public long countMessagesGloballyByAuthor(long user) throws UnexpectedException;
+  long countMessagesGloballyByAuthor(long user) throws UnexpectedException;
 
   /**
    * Returns an array of results from doing a global search on the given searchterm.
@@ -1389,17 +1343,17 @@ public interface ServerSession {
    * @param length
    * @throws UnexpectedException
    */
-  public GlobalMessageSearchResult[] searchMessagesGlobally(
-      String searchterm, int offset, int length) throws UnexpectedException;
+  GlobalMessageSearchResult[] searchMessagesGlobally(String searchterm, int offset, int length)
+      throws UnexpectedException;
 
   /**
    * Selects result from doing a global search on the given searchterm.
    *
    * @param searchterm
    * @throws UnexpectedException
-   * @returns true if selection is complete, false if incomplete (overflow)
+   * @return true if selection is complete, false if incomplete (overflow)
    */
-  public boolean selectMessagesGlobally(String searchterm) throws UnexpectedException;
+  boolean selectMessagesGlobally(String searchterm) throws UnexpectedException;
 
   /**
    * Returns the approximate number of messages matching a given search term
@@ -1407,7 +1361,7 @@ public interface ServerSession {
    * @param searchterm The search term
    * @throws UnexpectedException
    */
-  public long countSearchMessagesGlobally(String searchterm) throws UnexpectedException;
+  long countSearchMessagesGlobally(String searchterm) throws UnexpectedException;
 
   /**
    * Returns the last message head.
@@ -1416,7 +1370,7 @@ public interface ServerSession {
    * @throws ObjectNotFoundException
    * @throws UnexpectedException
    */
-  public MessageHeader getLastMessageHeader()
+  MessageHeader getLastMessageHeader()
       throws ObjectNotFoundException, NoCurrentMessageException, UnexpectedException;
 
   /**
@@ -1427,7 +1381,7 @@ public interface ServerSession {
    * @throws UnexpectedException
    * @throws ObjectNotFoundException
    */
-  public int skipMessagesBySubject(String subject, boolean skipGlobal)
+  int skipMessagesBySubject(String subject, boolean skipGlobal)
       throws UnexpectedException, NoCurrentMessageException, ObjectNotFoundException;
 
   /**
@@ -1438,7 +1392,7 @@ public interface ServerSession {
    * @throws UnexpectedException
    * @throws ObjectNotFoundException
    */
-  public int skipThread(long msg)
+  int skipThread(long msg)
       throws UnexpectedException, ObjectNotFoundException, NoCurrentMessageException,
           SelectionOverflowException;
 
@@ -1450,7 +1404,7 @@ public interface ServerSession {
    * @throws UnexpectedException
    * @throws ObjectNotFoundException
    */
-  public int skipBranch(long node)
+  int skipBranch(long node)
       throws UnexpectedException, NoCurrentMessageException, ObjectNotFoundException;
 
   /**
@@ -1461,9 +1415,9 @@ public interface ServerSession {
    * @param conference Conference Id.
    * @throws UnexpectedException
    */
-  public void deleteConference(long conference) throws AuthorizationException, UnexpectedException;
+  void deleteConference(long conference) throws AuthorizationException, UnexpectedException;
 
-  public short getObjectKind(long conference) throws ObjectNotFoundException;
+  short getObjectKind(long conference) throws ObjectNotFoundException;
 
   /**
    * Returns the Envelope for the last rule posting (which is the last message which has a
@@ -1475,7 +1429,7 @@ public interface ServerSession {
    * @throws UnexpectedException
    * @throws AuthorizationException
    */
-  public Envelope getLastRulePostingInConference(long conference)
+  Envelope getLastRulePostingInConference(long conference)
       throws ObjectNotFoundException, NoRulesException, UnexpectedException, AuthorizationException;
 
   /**
@@ -1487,7 +1441,7 @@ public interface ServerSession {
    * @throws UnexpectedException
    * @throws AuthorizationException
    */
-  public Envelope getLastRulePosting()
+  Envelope getLastRulePosting()
       throws ObjectNotFoundException, NoRulesException, UnexpectedException, AuthorizationException;
 
   /**
@@ -1500,7 +1454,7 @@ public interface ServerSession {
    * @throws UnexpectedException
    * @throws ObjectNotFoundException
    */
-  public MessageOccurrence storeRulePosting(UnstoredMessage msg)
+  MessageOccurrence storeRulePosting(UnstoredMessage msg)
       throws AuthorizationException, UnexpectedException, ObjectNotFoundException;
 
   /**
@@ -1508,7 +1462,7 @@ public interface ServerSession {
    *
    * @throws UnexpectedException
    */
-  public void updateLastlogin() throws ObjectNotFoundException, UnexpectedException;
+  void updateLastlogin() throws ObjectNotFoundException, UnexpectedException;
 
   /**
    * Returns the message header for a message identified by a global id.
@@ -1518,7 +1472,7 @@ public interface ServerSession {
    * @throws AuthorizationException
    * @throws UnexpectedException
    */
-  public MessageHeader getMessageHeader(MessageLocator locator)
+  MessageHeader getMessageHeader(MessageLocator locator)
       throws ObjectNotFoundException, AuthorizationException, NoCurrentMessageException,
           UnexpectedException;
 
@@ -1528,7 +1482,7 @@ public interface ServerSession {
    * @param limit Maximum number of messages to return
    * @throws UnexpectedException
    */
-  public MessageLogItem[] getChatMessagesFromLog(int limit) throws UnexpectedException;
+  MessageLogItem[] getChatMessagesFromLog(int limit) throws UnexpectedException;
 
   /**
    * Returns an array of multicast messages from the message log
@@ -1536,7 +1490,7 @@ public interface ServerSession {
    * @param limit Maximum number of messages to return
    * @throws UnexpectedException
    */
-  public MessageLogItem[] getMulticastMessagesFromLog(int limit) throws UnexpectedException;
+  MessageLogItem[] getMulticastMessagesFromLog(int limit) throws UnexpectedException;
 
   /**
    * Returns an array of broadcast messages from the message log
@@ -1544,7 +1498,7 @@ public interface ServerSession {
    * @param limit Maximum number of messages to return
    * @throws UnexpectedException
    */
-  public MessageLogItem[] getBroadcastMessagesFromLog(int limit) throws UnexpectedException;
+  MessageLogItem[] getBroadcastMessagesFromLog(int limit) throws UnexpectedException;
 
   /**
    * Does a simple grep-like search in the given conference.
@@ -1555,7 +1509,7 @@ public interface ServerSession {
    * @param length
    * @return
    */
-  public LocalMessageSearchResult[] grepMessagesLocally(
+  LocalMessageSearchResult[] grepMessagesLocally(
       long conference, String searchterm, int offset, int length) throws UnexpectedException;
 
   /**
@@ -1565,8 +1519,7 @@ public interface ServerSession {
    * @param searchterm
    * @return true if selection is complete, false if incomplete (overflow)
    */
-  public boolean selectGrepMessagesLocally(long conference, String searchterm)
-      throws UnexpectedException;
+  boolean selectGrepMessagesLocally(long conference, String searchterm) throws UnexpectedException;
 
   /**
    * Count approximate number of hits with a grep-like search
@@ -1577,7 +1530,7 @@ public interface ServerSession {
    * @throws UnexpectedException
    * @throws ObjectNotFoundException
    */
-  public long countGrepMessagesLocally(long conference, String searchterm)
+  long countGrepMessagesLocally(long conference, String searchterm)
       throws UnexpectedException, AuthorizationException, ObjectNotFoundException;
 
   /**
@@ -1590,7 +1543,7 @@ public interface ServerSession {
    * @param length
    * @throws UnexpectedException
    */
-  public abstract LocalMessageSearchResult[] searchMessagesLocally(
+  LocalMessageSearchResult[] searchMessagesLocally(
       long conference, String searchterm, int offset, int length) throws UnexpectedException;
 
   /**
@@ -1601,8 +1554,7 @@ public interface ServerSession {
    * @return true if selection is complete, false if incomplete (overflow)
    * @throws UnexpectedException
    */
-  public abstract boolean selectMessagesLocally(long conference, String searchterm)
-      throws UnexpectedException;
+  boolean selectMessagesLocally(long conference, String searchterm) throws UnexpectedException;
 
   /**
    * Counts the approximate number of hits for a search term in the current conference.
@@ -1613,7 +1565,7 @@ public interface ServerSession {
    * @throws UnexpectedException
    * @throws ObjectNotFoundException
    */
-  public abstract long countSearchMessagesLocally(long conference, String searchterm)
+  long countSearchMessagesLocally(long conference, String searchterm)
       throws UnexpectedException, AuthorizationException, ObjectNotFoundException;
 
   /**
@@ -1625,7 +1577,7 @@ public interface ServerSession {
    * @param length List limit
    * @throws UnexpectedException
    */
-  public UserLogItem[] listUserLog(Timestamp start, Timestamp end, int offset, int length)
+  UserLogItem[] listUserLog(Timestamp start, Timestamp end, int offset, int length)
       throws UnexpectedException;
 
   /**
@@ -1638,8 +1590,8 @@ public interface ServerSession {
    * @param length List limit
    * @throws UnexpectedException
    */
-  public UserLogItem[] listUserLog(
-      long user, Timestamp start, Timestamp end, int offset, int length) throws UnexpectedException;
+  UserLogItem[] listUserLog(long user, Timestamp start, Timestamp end, int offset, int length)
+      throws UnexpectedException;
 
   /**
    * Checks the status of a file
@@ -1649,8 +1601,7 @@ public interface ServerSession {
    * @throws ObjectNotFoundException
    * @throws UnexpectedException
    */
-  public FileStatus statFile(long parent, String name)
-      throws ObjectNotFoundException, UnexpectedException;
+  FileStatus statFile(long parent, String name) throws ObjectNotFoundException, UnexpectedException;
 
   /**
    * Lists files under a specified parent matching a pattern.
@@ -1660,7 +1611,7 @@ public interface ServerSession {
    * @throws ObjectNotFoundException
    * @throws UnexpectedException
    */
-  public FileStatus[] listFiles(long parent, String pattern)
+  FileStatus[] listFiles(long parent, String pattern)
       throws ObjectNotFoundException, UnexpectedException;
 
   /**
@@ -1671,7 +1622,7 @@ public interface ServerSession {
    * @throws ObjectNotFoundException
    * @throws UnexpectedException
    */
-  public String readFile(long parent, String name)
+  String readFile(long parent, String name)
       throws ObjectNotFoundException, AuthorizationException, UnexpectedException;
 
   /**
@@ -1684,7 +1635,7 @@ public interface ServerSession {
    * @param permissions The permissions
    * @throws UnexpectedException
    */
-  public void storeFile(long parent, String name, String content, int permissions)
+  void storeFile(long parent, String name, String content, int permissions)
       throws AuthorizationException, ObjectNotFoundException, UnexpectedException;
 
   /**
@@ -1696,7 +1647,7 @@ public interface ServerSession {
    * @throws ObjectNotFoundException
    * @throws UnexpectedException
    */
-  public void deleteFile(long parent, String name)
+  void deleteFile(long parent, String name)
       throws AuthorizationException, ObjectNotFoundException, UnexpectedException;
 
   /**
@@ -1707,7 +1658,7 @@ public interface ServerSession {
    * @throws ObjectNotFoundException
    * @throws UnexpectedException
    */
-  public String readSystemFile(String name)
+  String readSystemFile(String name)
       throws AuthorizationException, ObjectNotFoundException, UnexpectedException;
 
   /**
@@ -1718,7 +1669,7 @@ public interface ServerSession {
    * @throws AuthorizationException
    * @throws UnexpectedException
    */
-  public void storeSystemFile(String name, String content)
+  void storeSystemFile(String name, String content)
       throws AuthorizationException, UnexpectedException;
 
   /**
@@ -1729,14 +1680,14 @@ public interface ServerSession {
    * @throws ObjectNotFoundException
    * @throws UnexpectedException
    */
-  public void deleteSystemFile(String name)
+  void deleteSystemFile(String name)
       throws AuthorizationException, ObjectNotFoundException, UnexpectedException;
 
   /** Returns the HeartbeatListener associated with this session. */
-  public HeartbeatListener getHeartbeatListener();
+  HeartbeatListener getHeartbeatListener();
 
   /** Returns the date and time of the last heartbeat received */
-  public long getLastHeartbeat();
+  long getLastHeartbeat();
 
   /**
    * Kills a user session. Tries to request the frontend to shut down the connection to the user.
@@ -1746,7 +1697,7 @@ public interface ServerSession {
    * @throws ObjectNotFoundException
    * @throws UnexpectedException
    */
-  public void killSession(int sessionId)
+  void killSession(int sessionId)
       throws AuthorizationException, ObjectNotFoundException, UnexpectedException;
 
   /**
@@ -1756,7 +1707,7 @@ public interface ServerSession {
    * @throws ObjectNotFoundException
    * @throws UnexpectedException
    */
-  public void killAllSessions()
+  void killAllSessions()
       throws AuthorizationException, ObjectNotFoundException, UnexpectedException;
 
   /**
@@ -1764,17 +1715,17 @@ public interface ServerSession {
    *
    * @throws AuthenticationException
    */
-  public void prohibitLogin() throws AuthorizationException;
+  void prohibitLogin() throws AuthorizationException;
 
   /**
    * Allows login for everyone.
    *
    * @throws AuthenticationException
    */
-  public void allowLogin() throws AuthorizationException;
+  void allowLogin() throws AuthorizationException;
 
   /** Returns information and statistics about the system. */
-  public SystemInformation getSystemInformation() throws UnexpectedException;
+  SystemInformation getSystemInformation() throws UnexpectedException;
 
   /**
    * Changes a setting having a string value.
@@ -1783,8 +1734,7 @@ public interface ServerSession {
    * @param value The value
    * @throws UnexpectedException
    */
-  public void changeSetting(String name, String value)
-      throws AuthorizationException, UnexpectedException;
+  void changeSetting(String name, String value) throws AuthorizationException, UnexpectedException;
 
   /**
    * Changes a setting having a numeric value.
@@ -1793,8 +1743,7 @@ public interface ServerSession {
    * @param value The value
    * @throws UnexpectedException
    */
-  public void changeSetting(String name, long value)
-      throws AuthorizationException, UnexpectedException;
+  void changeSetting(String name, long value) throws AuthorizationException, UnexpectedException;
 
   /**
    * Creates a user filter, causing us to ignore certain objects and events from a user.
@@ -1802,8 +1751,7 @@ public interface ServerSession {
    * @param jinge The user to ignore
    * @param flags What to ignore
    */
-  public void createUserFilter(long jinge, long flags)
-      throws ObjectNotFoundException, UnexpectedException;
+  void createUserFilter(long jinge, long flags) throws ObjectNotFoundException, UnexpectedException;
 
   /**
    * Drops a user filter, i.e. stop ignoring objects and events from a user.
@@ -1812,14 +1760,14 @@ public interface ServerSession {
    * @throws ObjectNotFoundException
    * @throws UnexpectedException
    */
-  public void dropUserFilter(long user) throws ObjectNotFoundException, UnexpectedException;
+  void dropUserFilter(long user) throws ObjectNotFoundException, UnexpectedException;
 
   /**
    * Lists the user filters in effect for the logged in user.
    *
    * @throws UnexpectedException
    */
-  public Relationship[] listFilters() throws UnexpectedException;
+  Relationship[] listFilters() throws UnexpectedException;
 
   /**
    * Lists all users that have read a certain text.
@@ -1829,11 +1777,11 @@ public interface ServerSession {
    * @throws UnexpectedException
    * @throws NoCurrentMessageException
    */
-  public NameAssociation[] listReaders(MessageLocator ml)
+  NameAssociation[] listReaders(MessageLocator ml)
       throws UnexpectedException, NoCurrentMessageException;
 
   /** Clears all caches */
-  public void clearCache() throws AuthorizationException;
+  void clearCache() throws AuthorizationException;
 
   /**
    * Allows self registration.
@@ -1841,7 +1789,7 @@ public interface ServerSession {
    * @throws AuthorizationException
    * @throws UnexpectedException
    */
-  public void enableSelfRegistration() throws AuthorizationException, UnexpectedException;
+  void enableSelfRegistration() throws AuthorizationException, UnexpectedException;
 
   /**
    * Disallows self registration.
@@ -1849,7 +1797,7 @@ public interface ServerSession {
    * @throws AuthorizationException
    * @throws UnexpectedException
    */
-  public void disableSelfRegistration() throws AuthorizationException, UnexpectedException;
+  void disableSelfRegistration() throws AuthorizationException, UnexpectedException;
 
   /**
    * Searches and returns the messages that are comments to messages written by the given user.
@@ -1860,20 +1808,17 @@ public interface ServerSession {
    * @return
    * @throws UnexpectedException
    */
-  public abstract MessageSearchResult[] listCommentsGloballyToAuthor(
+  MessageSearchResult[] listCommentsGloballyToAuthor(
       long user, Timestamp startDate, int offset, int length) throws UnexpectedException;
 
   /**
    * Select the messages that are comments to messages written by the given user.
    *
    * @param user
-   * @param offset
-   * @param length
    * @return True if selection is complete
    * @throws UnexpectedException
    */
-  public abstract boolean selectCommentsGloballyToAuthor(long user, Timestamp startDate)
-      throws UnexpectedException;
+  boolean selectCommentsGloballyToAuthor(long user, Timestamp startDate) throws UnexpectedException;
 
   /**
    * Counts the number of messages that are comments to messages written by the given user.
@@ -1882,8 +1827,7 @@ public interface ServerSession {
    * @retur
    * @throws UnexpectedException
    */
-  public abstract long countCommentsGloballyToAuthor(long user, Timestamp startDate)
-      throws UnexpectedException;
+  long countCommentsGloballyToAuthor(long user, Timestamp startDate) throws UnexpectedException;
 
   /**
    * Bookmarks a message
@@ -1892,7 +1836,7 @@ public interface ServerSession {
    * @param annotation A textual annotation
    * @throws UnexpectedException
    */
-  public void addBookmark(MessageLocator message, String annotation)
+  void addBookmark(MessageLocator message, String annotation)
       throws ObjectNotFoundException, NoCurrentMessageException, UnexpectedException;
 
   /**
@@ -1901,11 +1845,11 @@ public interface ServerSession {
    * @param message The message id of the bookmark
    * @throws UnexpectedException
    */
-  public void deleteBookmark(MessageLocator message)
+  void deleteBookmark(MessageLocator message)
       throws ObjectNotFoundException, NoCurrentMessageException, UnexpectedException;
 
   /** Returns bookmarks for the current user */
-  public Bookmark[] listBookmarks() throws UnexpectedException;
+  Bookmark[] listBookmarks() throws UnexpectedException;
 
   /**
    * Posts an incoming email to the appropriate conference and on behalf of the user that the sender
@@ -1922,12 +1866,12 @@ public interface ServerSession {
    * @throws AuthorizationException
    * @throws UnexpectedException
    */
-  public MessageOccurrence postIncomingEmail(
+  MessageOccurrence postIncomingEmail(
       String sender, String receiver, Date sent, Date received, String subject, String content)
       throws EmailRecipientNotRecognizedException, EmailSenderNotRecognizedException,
           AuthorizationException, UnexpectedException;
 
-  public SelectedMessages getSelectedMessages();
+  SelectedMessages getSelectedMessages();
 
   /**
    * Sets the current activity indicator. See constants.Activities for values.
@@ -1935,34 +1879,34 @@ public interface ServerSession {
    * @param activity The new activity.
    * @param keepState Record the previous state.
    */
-  public void setActivity(short activity, boolean keepState);
+  void setActivity(short activity, boolean keepState);
 
   /** Restores the previous activity, which is initialized to Activities.AUTO on logon. */
-  public void restoreState();
+  void restoreState();
 
   /** Clears both the current and the last state. Called to clear all activity markers. */
-  public void clearStates();
+  void clearStates();
 
   /**
    * Retrieves the current activity.
    *
    * @return The activity ID.
    */
-  public short getActivity();
-
-  /**
-   * Sets the activity string, which may be displayed in the user list.
-   *
-   * @param text The text to be set.
-   */
-  public void setActivityString(String text);
+  short getActivity();
 
   /**
    * Retrieves the user-specified activity string if set.
    *
    * @return A String containing the text.
    */
-  public String getActivityString();
+  String getActivityString();
+
+  /**
+   * Sets the activity string, which may be displayed in the user list.
+   *
+   * @param text The text to be set.
+   */
+  void setActivityString(String text);
 
   /**
    * Retrieves the last object operated on (given that the command that acted on the object actually
@@ -1970,12 +1914,12 @@ public interface ServerSession {
    *
    * @return An object ID.
    */
-  public long getLastObject();
+  long getLastObject();
 
   /**
    * Sets the last object the user fiddled with.
    *
    * @param ID The ID of a named object.
    */
-  public void setLastObject(long ID);
+  void setLastObject(long ID);
 }

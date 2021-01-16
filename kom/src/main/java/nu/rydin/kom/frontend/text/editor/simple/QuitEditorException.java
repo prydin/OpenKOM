@@ -8,7 +8,7 @@ package nu.rydin.kom.frontend.text.editor.simple;
 
 import nu.rydin.kom.exceptions.EscapeException;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class QuitEditorException extends EscapeException {
   static final long serialVersionUID = 2005;
 

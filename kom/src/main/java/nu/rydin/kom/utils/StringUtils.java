@@ -6,7 +6,7 @@
  */
 package nu.rydin.kom.utils;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class StringUtils {
   /**
    * Returns true if the supplied string can be interpreted as an integer.

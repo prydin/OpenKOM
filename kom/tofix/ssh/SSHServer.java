@@ -44,8 +44,8 @@ import com.sshtools.j2ssh.util.StartStopState;
 /**
  * This is a J2SSH server implemented as an OpenKOM module.
  * 
- * @author Henrik Schröder
- * @author <a href=mailto:jepson@xyzzy.se>Jepson</a>
+ * @author Henrik Schrï¿½der
+ * @author Jepson
  */
 public class SSHServer implements Module
 {    

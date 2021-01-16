@@ -13,55 +13,65 @@ import java.util.List;
 import nu.rydin.kom.structs.Name;
 import nu.rydin.kom.structs.NameAssociation;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class SQLUtils {
-  public static long[] extractLongs(ResultSet rs, int index) throws SQLException {
-    List<Long> l = new ArrayList<Long>();
-    while (rs.next()) l.add(rs.getLong(index));
-    int top = l.size();
-    long[] answer = new long[top];
-    for (int idx = 0; idx < top; ++idx) answer[idx] = l.get(idx);
+  public static long[] extractLongs(final ResultSet rs, final int index) throws SQLException {
+    final List<Long> l = new ArrayList<>();
+    while (rs.next()) {
+      l.add(rs.getLong(index));
+    }
+    final int top = l.size();
+    final long[] answer = new long[top];
+    for (int idx = 0; idx < top; ++idx) {
+      answer[idx] = l.get(idx);
+    }
     return answer;
   }
 
-  public static int[] extractInts(ResultSet rs, int index) throws SQLException {
-    List<Integer> l = new ArrayList<Integer>();
-    while (rs.next()) l.add(rs.getInt(index));
-    int top = l.size();
-    int[] answer = new int[top];
-    for (int idx = 0; idx < top; ++idx) answer[idx] = l.get(idx);
+  public static int[] extractInts(final ResultSet rs, final int index) throws SQLException {
+    final List<Integer> l = new ArrayList<>();
+    while (rs.next()) {
+      l.add(rs.getInt(index));
+    }
+    final int top = l.size();
+    final int[] answer = new int[top];
+    for (int idx = 0; idx < top; ++idx) {
+      answer[idx] = l.get(idx);
+    }
     return answer;
   }
 
   public static Name[] extractStrings(
-      ResultSet rs, int nameIndex, int visibilityIndex, int kindIndex, String pattern)
+          final ResultSet rs, final int nameIndex, final int visibilityIndex, final int kindIndex, final String pattern)
       throws SQLException {
-    List<Name> l = new ArrayList<Name>();
+    final List<Name> l = new ArrayList<>();
     while (rs.next()) {
-      String name = rs.getString(nameIndex);
-      if (NameUtils.match(pattern, name, false))
+      final String name = rs.getString(nameIndex);
+      if (NameUtils.match(pattern, name, false)) {
         l.add(new Name(name, rs.getShort(visibilityIndex), rs.getShort(kindIndex)));
+      }
     }
-    int top = l.size();
-    Name[] answer = new Name[top];
+    final int top = l.size();
+    final Name[] answer = new Name[top];
     l.toArray(answer);
     return answer;
   }
 
   public static NameAssociation[] extractNames(
-      ResultSet rs, int idIndex, int nameIndex, int visibilityIndex, int kindIndex, String pattern)
+          final ResultSet rs, final int idIndex, final int nameIndex, final int visibilityIndex, final int kindIndex, final String pattern)
       throws SQLException {
-    List<NameAssociation> l = new ArrayList<NameAssociation>();
+    final List<NameAssociation> l = new ArrayList<>();
     while (rs.next()) {
-      String name = rs.getString(nameIndex);
-      if (pattern == null || NameUtils.match(pattern, name, false))
+      final String name = rs.getString(nameIndex);
+      if (pattern == null || NameUtils.match(pattern, name, false)) {
         l.add(
             new NameAssociation(
                 rs.getLong(idIndex),
                 new Name(name, rs.getShort(visibilityIndex), rs.getShort(kindIndex))));
+      }
     }
-    int top = l.size();
-    NameAssociation[] answer = new NameAssociation[top];
+    final int top = l.size();
+    final NameAssociation[] answer = new NameAssociation[top];
     l.toArray(answer);
     return answer;
   }

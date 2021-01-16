@@ -15,7 +15,7 @@ import nu.rydin.kom.frontend.text.parser.CommandLineParameter;
 import nu.rydin.kom.frontend.text.parser.CommandLinePart;
 import nu.rydin.kom.frontend.text.parser.CommandNamePart;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public interface Command {
   /**
    * Executes the command with the given parameters in the given context.

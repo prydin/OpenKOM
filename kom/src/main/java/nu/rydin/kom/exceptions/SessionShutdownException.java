@@ -12,7 +12,7 @@ import nu.rydin.kom.events.Event;
  * This exception does not signal an error. A session receiving this exception should immedately
  * clean up and terminate itself.
  *
- * @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a>
+ * @author Pontus Rydin
  */
 public class SessionShutdownException extends UrgentEventException {
   static final long serialVersionUID = 2005;

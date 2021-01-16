@@ -16,122 +16,28 @@ import java.util.Map;
 import nu.rydin.kom.events.Event;
 import nu.rydin.kom.events.EventTarget;
 import nu.rydin.kom.events.SessionShutdownEvent;
-import nu.rydin.kom.exceptions.UnexpectedException;
-import nu.rydin.kom.utils.Logger;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /**
  * Holds the currently active sessions.
  *
- * @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a>
+ * @author Pontus Rydin
  */
 public class SessionManager {
+  private static final Logger LOG = LogManager.getLogger(SessionManager.class);
   /** Currently active sessions keyed by session id */
-  private Map<Integer, ServerSession> m_sessionsById =
-      Collections.synchronizedMap(new HashMap<Integer, ServerSession>());
+  private final Map<Integer, ServerSession> m_sessionsById =
+      Collections.synchronizedMap(new HashMap<>());
 
   /** Currently active sessions as an ordered list. */
-  private List<ServerSession> m_orderedList =
-      Collections.synchronizedList(new LinkedList<ServerSession>());
+  private final List<ServerSession> m_orderedList =
+      Collections.synchronizedList(new LinkedList<>());
 
   /** Queue of events to be broadcasted */
-  private LinkedList<Event> m_broadcastQueue = new LinkedList<Event>();
-
-  private class Broadcaster extends Thread {
-    private int INITIAL_RETRY_WAIT = 1000;
-    private int RETRY_WAIT_INC = 1000;
-    private int MAX_RETRY_WAIT = 5000;
-
-    public Broadcaster() {
-      super("Broadcaster");
-      this.setDaemon(true);
-    }
-
-    public void run() {
-      try {
-        for (; ; ) {
-          SessionManager sm = SessionManager.this;
-          List<ServerSession> sessions = null;
-          Event e = null;
-          synchronized (sm) {
-            while (sm.m_broadcastQueue.isEmpty()) sm.wait();
-            e = sm.m_broadcastQueue.removeFirst();
-            sessions = sm.listSessions();
-          }
-
-          // Note: We're working on a snapshot here, which means that
-          // we might actually end up sending events to sessions that
-          // are on their way down and miss sessions that are appearing
-          // as we do this. The alternative would have been to lock the
-          // queue while we're doing this. Since the possible race-condition
-          // is reasonably benign and the cost of locking the queue might
-          // potentially be high (event handlers do not execute in
-          // deterministic time), we accept that trade-off.
-          //
-          int retryWait = INITIAL_RETRY_WAIT;
-
-          // Create snapshot to iterate over
-          //
-          for (Iterator<ServerSession> itor = sessions.iterator(); itor.hasNext(); ) {
-            for (; ; ) {
-              // We absolutely don't want this thread to die, so we need
-              // to handle exceptions carefully.
-              //
-              try {
-                ServerSession each = itor.next();
-
-                // Don't send to originator unless the event explicitly ask
-                // for it.
-                //
-                if (!e.sendToSelf() && each.getLoggedInUserId() == e.getOriginatingUser()) break;
-                ServerSessionImpl sess = (ServerSessionImpl) each;
-                sess.acquireMutex();
-                try {
-                  e.dispatch((EventTarget) each);
-                } finally {
-                  sess.releaseMutex();
-                }
-
-                // If we get here, we didn't run into any problems
-                // and we don't have to retry.
-                //
-                break;
-              } catch (InterruptedException ex) {
-                // Shutting down, we're outta here!
-                //
-                throw ex;
-              } catch (Throwable t) {
-                // Log this!
-                //
-                Logger.error(this, "Exception in Broadcaster", t);
-
-                // Unhandled exception. Wait and retry. We increase the wait
-                // for every failure and eventually give up.
-                //
-                if (retryWait > MAX_RETRY_WAIT) {
-                  // We've exceeded the max retry time. Skip this session!
-                  //
-                  Logger.warn(this, "Giving up!");
-                  retryWait = INITIAL_RETRY_WAIT;
-                  break;
-                }
-
-                // Try again, but first, wait a little
-                //
-                Logger.warn(this, "Retrying... ");
-                Thread.sleep(retryWait);
-                retryWait += RETRY_WAIT_INC;
-              }
-            }
-          }
-        }
-      } catch (InterruptedException e) {
-        // Graceful shutdown
-      }
-    }
-  }
+  private final LinkedList<Event> m_broadcastQueue = new LinkedList<>();
 
   private Broadcaster m_broadcaster;
-
   private boolean m_allowLogin;
 
   public SessionManager() {
@@ -163,12 +69,14 @@ public class SessionManager {
     m_allowLogin = false;
   }
 
-  public void killSessionById(int sessionId) throws UnexpectedException, InterruptedException {
-    ServerSession session = this.getSessionById(sessionId);
+  public void killSessionById(final int sessionId) throws InterruptedException {
+    final ServerSession session = getSessionById(sessionId);
 
     // Not logged in? Nothing to shut down. Fail silently.
     //
-    if (session == null) return;
+    if (session == null) {
+      return;
+    }
 
     // Post shutdown event
     //
@@ -177,11 +85,13 @@ public class SessionManager {
     // Wait for session to terminate
     //
     int top = ServerSettings.getSessionShutdownRetries();
-    long delay = ServerSettings.getSessionShutdownDelay();
+    final long delay = ServerSettings.getSessionShutdownDelay();
     while (top-- > 0) {
       // Has it disappeared yet?
       //
-      if (this.getSessionById(sessionId) == null) return;
+      if (getSessionById(sessionId) == null) {
+        return;
+      }
       Thread.sleep(delay);
     }
 
@@ -189,16 +99,8 @@ public class SessionManager {
     // it nicely. Mark it as invalid so that the next request
     // to the server is guaranteed to fail.
     //
-    ServerSessionImpl ssi = (ServerSessionImpl) this.getSessionById(sessionId);
-    this.unRegisterSession(ssi);
-
-    // Did it dissapear while we were fiddling around?
-    // Well... That's exactly what we want!
-    // Note that it may also disappear while we're marking
-    // it as invalid, but since that race-condition is completely
-    // harmless, we don't waste time synchronizing.
-    //
-    if (ssi == null) return;
+    final ServerSessionImpl ssi = (ServerSessionImpl) getSessionById(sessionId);
+    unRegisterSession(ssi);
     ssi.markAsInvalid();
   }
 
@@ -207,7 +109,7 @@ public class SessionManager {
    *
    * @param session The session
    */
-  public synchronized void registerSession(ServerSession session) {
+  public synchronized void registerSession(final ServerSession session) {
     m_sessionsById.put(session.getSessionId(), session);
     m_orderedList.add(session);
   }
@@ -217,7 +119,7 @@ public class SessionManager {
    *
    * @param session The session
    */
-  public synchronized void unRegisterSession(ServerSession session) {
+  public synchronized void unRegisterSession(final ServerSession session) {
     m_sessionsById.remove(session.getSessionId());
     m_orderedList.remove(session);
   }
@@ -227,20 +129,21 @@ public class SessionManager {
    *
    * @param sessionId The session id
    */
-  public synchronized ServerSession getSessionById(int sessionId) {
-    return (ServerSession) m_sessionsById.get(sessionId);
+  public synchronized ServerSession getSessionById(final int sessionId) {
+    return m_sessionsById.get(sessionId);
   }
 
   /** Lists the sessions in the order they were created. */
   public synchronized List<ServerSession> listSessions() {
-    return new LinkedList<ServerSession>(m_orderedList);
+    return new LinkedList<>(m_orderedList);
   }
 
-  public List<ServerSession> getSessionsByUser(long u) {
-    ArrayList<ServerSession> list = new ArrayList<ServerSession>();
-    for (Iterator<ServerSession> itor = m_orderedList.iterator(); itor.hasNext(); ) {
-      ServerSession each = itor.next();
-      if (each.getLoggedInUserId() == u) list.add(each);
+  public List<ServerSession> getSessionsByUser(final long u) {
+    final ArrayList<ServerSession> list = new ArrayList<>();
+    for (final ServerSession each : m_orderedList) {
+      if (each.getLoggedInUserId() == u) {
+        list.add(each);
+      }
     }
     return list;
   }
@@ -250,8 +153,8 @@ public class SessionManager {
    *
    * @param u The user ID.
    */
-  public synchronized boolean userHasSession(long u) {
-    return this.getSessionsByUser(u).size() > 0;
+  public synchronized boolean userHasSession(final long u) {
+    return getSessionsByUser(u).size() > 0;
   }
 
   /**
@@ -259,9 +162,9 @@ public class SessionManager {
    *
    * @param e The event
    */
-  public synchronized void broadcastEvent(Event e) {
+  public synchronized void broadcastEvent(final Event e) {
     m_broadcastQueue.addLast(e);
-    this.notify();
+    notify();
   }
 
   /**
@@ -270,16 +173,115 @@ public class SessionManager {
    * @param user The user
    * @param e The event
    */
-  public void sendEvent(long user, Event e) {
-    List<ServerSession> s;
+  public void sendEvent(final long user, final Event e) {
+    final List<ServerSession> s;
     synchronized (this) {
-      s = this.getSessionsByUser(user);
+      s = getSessionsByUser(user);
     }
 
     // Fail silently if we couldn't find any sessions for the user
     //
-    for (Iterator<ServerSession> itor = s.iterator(); itor.hasNext(); ) {
-      e.dispatch((EventTarget) itor.next());
+    for (final ServerSession serverSession : s) {
+      e.dispatch((EventTarget) serverSession);
+    }
+  }
+
+  private class Broadcaster extends Thread {
+    private static final int INITIAL_RETRY_WAIT = 1000;
+    private static final int RETRY_WAIT_INC = 1000;
+    private static final int MAX_RETRY_WAIT = 5000;
+
+    public Broadcaster() {
+      super("Broadcaster");
+      setDaemon(true);
+    }
+
+    @Override
+    public void run() {
+      try {
+        for (; ; ) {
+          final SessionManager sm = SessionManager.this;
+          final List<ServerSession> sessions;
+          final Event e;
+          synchronized (sm) {
+            while (sm.m_broadcastQueue.isEmpty()) {
+              sm.wait();
+            }
+            e = sm.m_broadcastQueue.removeFirst();
+            sessions = sm.listSessions();
+          }
+
+          // Note: We're working on a snapshot here, which means that
+          // we might actually end up sending events to sessions that
+          // are on their way down and miss sessions that are appearing
+          // as we do this. The alternative would have been to lock the
+          // queue while we're doing this. Since the possible race-condition
+          // is reasonably benign and the cost of locking the queue might
+          // potentially be high (event handlers do not execute in
+          // deterministic time), we accept that trade-off.
+          //
+          int retryWait = INITIAL_RETRY_WAIT;
+
+          // Create snapshot to iterate over
+          //
+          for (final Iterator<ServerSession> itor = sessions.iterator(); itor.hasNext(); ) {
+            for (; ; ) {
+              // We absolutely don't want this thread to die, so we need
+              // to handle exceptions carefully.
+              //
+              try {
+                final ServerSession each = itor.next();
+
+                // Don't send to originator unless the event explicitly ask
+                // for it.
+                //
+                if (!e.sendToSelf() && each.getLoggedInUserId() == e.getOriginatingUser()) {
+                  break;
+                }
+                final ServerSessionImpl sess = (ServerSessionImpl) each;
+                sess.acquireMutex();
+                try {
+                  e.dispatch((EventTarget) each);
+                } finally {
+                  sess.releaseMutex();
+                }
+
+                // If we get here, we didn't run into any problems
+                // and we don't have to retry.
+                //
+                break;
+              } catch (final InterruptedException ex) {
+                // Shutting down, we're outta here!
+                //
+                throw ex;
+              } catch (final Throwable t) {
+                // Log this!
+                //
+                LOG.error("Exception in Broadcaster", t);
+
+                // Unhandled exception. Wait and retry. We increase the wait
+                // for every failure and eventually give up.
+                //
+                if (retryWait > MAX_RETRY_WAIT) {
+                  // We've exceeded the max retry time. Skip this session!
+                  //
+                  LOG.warn("Giving up!");
+                  retryWait = INITIAL_RETRY_WAIT;
+                  break;
+                }
+
+                // Try again, but first, wait a little
+                //
+                LOG.warn("Retrying... ");
+                Thread.sleep(retryWait);
+                retryWait += RETRY_WAIT_INC;
+              }
+            }
+          }
+        }
+      } catch (final InterruptedException e) {
+        // Graceful shutdown
+      }
     }
   }
 }

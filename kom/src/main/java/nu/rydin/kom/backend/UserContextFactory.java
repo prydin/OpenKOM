@@ -12,9 +12,9 @@ import java.util.List;
 import java.util.Map;
 import nu.rydin.kom.backend.data.MembershipManager;
 import nu.rydin.kom.backend.data.RelationshipManager;
-import nu.rydin.kom.exceptions.ObjectNotFoundException;
 import nu.rydin.kom.exceptions.UnexpectedException;
-import nu.rydin.kom.utils.Logger;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /**
  * Hands out user contexts. Only one context is kept per user, even though it may be used from
@@ -23,11 +23,58 @@ import nu.rydin.kom.utils.Logger;
  * @author Pontus Rydin
  */
 public class UserContextFactory {
+  private static final Logger LOG = LogManager.getLogger(UserContextFactory.class);
+
+  private static final UserContextFactory s_instance = new UserContextFactory();
+  private final Map<Long, UserContextWrapper> contexts = new HashMap<>();
+
+  public static UserContextFactory getInstance() {
+    return UserContextFactory.s_instance;
+  }
+
+  public synchronized UserContext getOrCreateContext(
+      final long user, final MembershipManager mm, final RelationshipManager rm)
+      throws UnexpectedException {
+    UserContextWrapper ucw = contexts.get(user);
+    if (ucw == null) {
+      LOG.info("Context not found for user " + user + ". Creating new.");
+      ucw = new UserContextWrapper(new UserContext(user, mm, rm));
+      contexts.put(user, ucw);
+    }
+    final int refCount = ucw.grab();
+    LOG.info("Grabbing context. Refcount for user " + user + " is now " + refCount);
+    return ucw.context;
+  }
+
+  public synchronized UserContext getContextOrNull(final long user) {
+    final UserContextWrapper cw = contexts.get(user);
+    return cw != null ? cw.context : null;
+  }
+
+  public synchronized void release(final long user) {
+    final UserContextWrapper ucw = contexts.get(user);
+    final int refCount = ucw.release();
+    if (refCount == 0) {
+      LOG.info("Context refcount reached zero for user " + user + ". Destroying context.");
+      contexts.remove(user);
+    } else {
+      LOG.info("Releasing context. Refcount for user " + user + " is now " + refCount);
+    }
+  }
+
+  public synchronized List<UserContext> listContexts() {
+    final List<UserContext> answer = new ArrayList<>(contexts.size());
+    for (final UserContextWrapper context : contexts.values()) {
+      answer.add(context.context);
+    }
+    return answer;
+  }
+
   private static class UserContextWrapper {
     private final UserContext context;
     private int refCount = 0;
 
-    public UserContextWrapper(UserContext context) {
+    public UserContextWrapper(final UserContext context) {
       this.context = context;
     }
 
@@ -38,48 +85,5 @@ public class UserContextFactory {
     public int release() {
       return --refCount;
     }
-  }
-
-  private static final UserContextFactory s_instance = new UserContextFactory();
-
-  private final Map<Long, UserContextWrapper> contexts = new HashMap<Long, UserContextWrapper>();
-
-  public static UserContextFactory getInstance() {
-    return s_instance;
-  }
-
-  public synchronized UserContext getOrCreateContext(
-      long user, MembershipManager mm, RelationshipManager rm)
-      throws ObjectNotFoundException, UnexpectedException {
-    UserContextWrapper ucw = contexts.get(user);
-    if (ucw == null) {
-      Logger.info(this, "Context not found for user " + user + ". Creating new.");
-      ucw = new UserContextWrapper(new UserContext(user, mm, rm));
-      contexts.put(user, ucw);
-    }
-    int refCount = ucw.grab();
-    Logger.info(this, "Grabbing context. Refcount for user " + user + " is now " + refCount);
-    return ucw.context;
-  }
-
-  public synchronized UserContext getContextOrNull(long user) {
-    UserContextWrapper cw = contexts.get(user);
-    return cw != null ? cw.context : null;
-  }
-
-  public synchronized void release(long user) {
-    UserContextWrapper ucw = contexts.get(user);
-    int refCount = ucw.release();
-    if (refCount == 0) {
-      Logger.info(this, "Context refcount reached zero for user " + user + ". Destroying context.");
-      contexts.remove(user);
-    } else
-      Logger.info(this, "Releasing context. Refcount for user " + user + " is now " + refCount);
-  }
-
-  public synchronized List<UserContext> listContexts() {
-    List<UserContext> answer = new ArrayList<UserContext>(contexts.size());
-    for (UserContextWrapper context : contexts.values()) answer.add(context.context);
-    return answer;
   }
 }

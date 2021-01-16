@@ -17,7 +17,7 @@ import nu.rydin.kom.frontend.text.parser.RightParameter;
 import nu.rydin.kom.frontend.text.parser.UserParameter;
 import nu.rydin.kom.structs.NameAssociation;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class AddPrivilege extends AbstractCommand {
   public AddPrivilege(Context context, String fullName, long permissions) {
     super(

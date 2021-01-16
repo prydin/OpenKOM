@@ -16,8 +16,8 @@ import nu.rydin.kom.i18n.MessageFormatter;
 import nu.rydin.kom.structs.MessageLocator;
 
 /**
- * @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a>
- * @author <a href=mailto:jepson@xyzzy.se>Jepson</a>
+ * @author Pontus Rydin
+ * @author Jepson
  */
 public class MarkTreeAsUnread extends AbstractCommand {
   public MarkTreeAsUnread(Context context, String fullname, long permissions) {

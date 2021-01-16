@@ -17,8 +17,8 @@ import nu.rydin.kom.frontend.text.parser.IntegerParameter;
 import nu.rydin.kom.structs.UnstoredMessage;
 
 /**
- * @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a>
- * @author <a href=mailto:jepson@xyzzy.se>Jepson</a>
+ * @author Pontus Rydin
+ * @author Jepson
  */
 public class GenerateTestdata extends AbstractCommand {
   private static final String s_subject = "Flinge J�cht informerar";

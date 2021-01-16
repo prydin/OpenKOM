@@ -20,7 +20,7 @@ import nu.rydin.kom.backend.data.UserLogManager;
 import nu.rydin.kom.backend.data.UserManager;
 import nu.rydin.kom.exceptions.UnexpectedException;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class DataAccess {
   /** JDBC connection to use for all database operations */
   private final Connection m_conn;

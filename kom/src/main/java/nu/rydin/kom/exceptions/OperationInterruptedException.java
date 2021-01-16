@@ -11,7 +11,7 @@ package nu.rydin.kom.exceptions;
  * java.lang.InterruptedException interrupts the entire session, whereas this exception just
  * interrupts the current command.
  *
- * @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a>
+ * @author Pontus Rydin
  */
 public class OperationInterruptedException extends UserException {
   static final long serialVersionUID = 2005;

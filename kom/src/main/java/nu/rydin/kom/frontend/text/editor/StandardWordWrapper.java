@@ -8,7 +8,7 @@ package nu.rydin.kom.frontend.text.editor;
 
 import java.util.StringTokenizer;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class StandardWordWrapper implements WordWrapper {
   private final StringTokenizer m_paraTokenizer;
   private final int m_width;

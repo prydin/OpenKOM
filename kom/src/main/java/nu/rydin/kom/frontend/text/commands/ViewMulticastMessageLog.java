@@ -12,7 +12,7 @@ import nu.rydin.kom.frontend.text.Context;
 import nu.rydin.kom.frontend.text.DisplayController;
 import nu.rydin.kom.structs.MessageLogItem;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class ViewMulticastMessageLog extends ViewMessageLog {
   public ViewMulticastMessageLog(Context context, String fullName, long permissions) {
     super(context, fullName, permissions);

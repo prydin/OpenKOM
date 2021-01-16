@@ -21,7 +21,7 @@ import nu.rydin.kom.frontend.text.editor.WordWrapper;
 import nu.rydin.kom.i18n.MessageFormatter;
 import nu.rydin.kom.structs.MessageLocator;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class Quote extends AbstractCommand {
   private final int QUOTE_WIDTH = 76;
 

@@ -9,7 +9,7 @@ package nu.rydin.kom.events;
 /**
  * Base class of all KOM events.
  *
- * @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a>
+ * @author Pontus Rydin
  */
 public class Event {
   /** The id of the user that sent the event, or -1 if the user could not be determined. */

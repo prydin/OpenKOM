@@ -22,7 +22,7 @@ import nu.rydin.kom.utils.PrintUtils;
 
 /**
  * @author Henrik Schr�der
- * @author <a href=mailto:jepson@xyzzy.se>Jepson</a>
+ * @author Jepson
  */
 public class CompactMessagePrinter extends AbstractMessagePrinter {
 

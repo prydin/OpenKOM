@@ -11,7 +11,7 @@ import nu.rydin.kom.events.Event;
 /**
  * This exception does not indicate an error, but is thrown when a high-priority event is delivered
  *
- * @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a>
+ * @author Pontus Rydin
  */
 public class EventDeliveredException extends LineEditorException {
   private Event m_event;

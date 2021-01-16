@@ -6,7 +6,7 @@
  */
 package nu.rydin.kom.frontend.text;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class KeystrokeTokenizer implements Cloneable {
   public static class Token {
     private final int m_kind;

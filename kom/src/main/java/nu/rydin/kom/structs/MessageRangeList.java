@@ -9,7 +9,7 @@ package nu.rydin.kom.structs;
 import com.frameworx.util.ListAtom;
 import java.io.Serializable;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class MessageRangeList extends ListAtom implements Serializable {
   static final long serialVersionUID = 2005;
 

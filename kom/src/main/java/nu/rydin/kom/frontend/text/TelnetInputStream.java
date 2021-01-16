@@ -12,10 +12,12 @@ import java.io.OutputStream;
 import java.net.SocketException;
 import java.util.LinkedList;
 import java.util.List;
-import nu.rydin.kom.utils.Logger;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class TelnetInputStream extends InputStream {
+  private static final Logger LOG = LogManager.getLogger(TelnetInputStream.class);
   private static final short STATE_NORMAL = 0;
   private static final short STATE_IAC = 1;
   private static final short STATE_WILL = 2;
@@ -68,103 +70,107 @@ public class TelnetInputStream extends InputStream {
   //
   private static final int LF = 10;
   private static final int CR = 13;
-
-  private short m_state = STATE_NORMAL;
-
-  private boolean m_suppressProcessing = false;
-
   private final InputStream m_input;
-
   private final OutputStream m_output;
-
+  private final List<TerminalSizeListener> m_sizeListeners = new LinkedList<>();
+  private final List<EnvironmentListener> m_environmentListeners = new LinkedList<>();
+  private short m_state = TelnetInputStream.STATE_NORMAL;
   private int[] m_dataBuffer;
-
   private int m_dataState;
-
   private int m_dataIdx;
 
-  private final List<TerminalSizeListener> m_sizeListeners = new LinkedList<TerminalSizeListener>();
-
-  private final List<EnvironmentListener> m_environmentListeners =
-      new LinkedList<EnvironmentListener>();
-
-  public TelnetInputStream(InputStream input, OutputStream output) throws IOException {
+  public TelnetInputStream(final InputStream input, final OutputStream output) throws IOException {
     m_input = input;
     m_output = output;
 
     // We're willing to receive environment variables
     //
-    this.sendOption(CHAR_DO, OPT_ENVIRON);
+    sendOption(TelnetInputStream.CHAR_DO, TelnetInputStream.OPT_ENVIRON);
 
     // Please don't use linemode
     //
-    this.sendOption(CHAR_WONT, OPT_LINEMODE);
+    sendOption(TelnetInputStream.CHAR_WONT, TelnetInputStream.OPT_LINEMODE);
 
     // We do use binary mode
     //
-    this.sendOption(CHAR_DO, OPT_BINARY);
+    sendOption(TelnetInputStream.CHAR_DO, TelnetInputStream.OPT_BINARY);
 
     // We will echo
     //
-    this.sendOption(CHAR_WILL, OPT_ECHO);
+    sendOption(TelnetInputStream.CHAR_WILL, TelnetInputStream.OPT_ECHO);
 
     // We will suppress go ahead
     //
-    this.sendOption(CHAR_WILL, OPT_SUPPRESS_GA);
+    sendOption(TelnetInputStream.CHAR_WILL, TelnetInputStream.OPT_SUPPRESS_GA);
 
     // Please use NAWS if you support it!
     //
-    this.sendOption(CHAR_DO, OPT_NAWS);
+    sendOption(TelnetInputStream.CHAR_DO, TelnetInputStream.OPT_NAWS);
 
     // Now would be a good time to send your environment variables
     //
-    m_output.write(CHAR_IAC);
-    m_output.write(CHAR_SB);
-    m_output.write(OPT_ENVIRON);
-    m_output.write(CHAR_SEND);
-    m_output.write(CHAR_IAC);
-    m_output.write(CHAR_SE);
+    m_output.write(TelnetInputStream.CHAR_IAC);
+    m_output.write(TelnetInputStream.CHAR_SB);
+    m_output.write(TelnetInputStream.OPT_ENVIRON);
+    m_output.write(TelnetInputStream.CHAR_SEND);
+    m_output.write(TelnetInputStream.CHAR_IAC);
+    m_output.write(TelnetInputStream.CHAR_SE);
 
     m_output.flush();
   }
 
-  public void addSizeListener(TerminalSizeListener listener) {
+  protected static int complement2(final int n) {
+    return n < 0 ? 256 + n : n;
+  }
+
+  public void addSizeListener(final TerminalSizeListener listener) {
     synchronized (m_sizeListeners) {
       m_sizeListeners.add(listener);
     }
   }
 
-  public void addEnvironmentListener(EnvironmentListener listener) {
+  public void addEnvironmentListener(final EnvironmentListener listener) {
     synchronized (m_environmentListeners) {
       m_environmentListeners.add(listener);
     }
   }
 
+  @Override
   public int read() throws IOException {
     for (; ; ) {
-      int data = m_input.read();
-      if (data == -1) return data; // EOF!
+      final int data = m_input.read();
+      if (data == -1) {
+        return data; // EOF!
+      }
 
       // Don't echo if we're called from block-read methods, since they
       // will take care of echoing themselves.
       //
-      if (!m_suppressProcessing) return data;
-      boolean valid = this.stateMachine(data);
-      if (valid) return data;
+      // TODO: Something very weird is going on here!
+      final boolean m_suppressProcessing = false;
+      if (!m_suppressProcessing) {
+        return data;
+      }
+      final boolean valid = stateMachine(data);
+      if (valid) {
+        return data;
+      }
     }
   }
 
-  public int read(byte b[]) throws IOException {
-    return this.read(b, 0, b.length);
+  @Override
+  public int read(final byte[] b) throws IOException {
+    return read(b, 0, b.length);
   }
 
-  public int read(byte b[], int off, int length) throws IOException {
-    byte[] buffer = new byte[length];
+  @Override
+  public int read(final byte[] b, final int off, final int length) throws IOException {
+    final byte[] buffer = new byte[length];
     for (; ; ) {
-      int n = -1;
+      int n;
       try {
         n = m_input.read(buffer);
-      } catch (SocketException e) {
+      } catch (final SocketException e) {
         // The socket was probably disconnected. Treat as EOF.
         //
         return -1;
@@ -174,217 +180,233 @@ public class TelnetInputStream extends InputStream {
       // We treat zero bytes returned as an EOF
       // condition as well.
       //
-      if (n <= 0) return -1;
-      n = this.handleBuffer(buffer, off, n);
+      if (n <= 0) {
+        return -1;
+      }
+      n = handleBuffer(buffer, off, n);
 
       // Anything left after trimming?
       // If not, try reading again
       //
-      if (n == 0) continue;
+      if (n == 0) {
+        continue;
+      }
       System.arraycopy(buffer, 0, b, off, n);
       return n;
     }
   }
 
-  protected int handleBuffer(byte[] bytes, int offset, int length) throws IOException {
-    byte[] copy = new byte[length];
+  protected int handleBuffer(final byte[] bytes, final int offset, final int length)
+      throws IOException {
+    final byte[] copy = new byte[length];
     int n = 0;
     for (int idx = 0; idx < length; ++idx) {
-      byte b = bytes[offset + idx];
-      boolean valid = this.stateMachine(b);
-      if (valid) copy[n++] = b;
+      final byte b = bytes[offset + idx];
+      final boolean valid = stateMachine(b);
+      if (valid) {
+        copy[n++] = b;
+      }
     }
     System.arraycopy(copy, 0, bytes, offset, n);
     return n;
   }
 
-  protected void sendCommand(int command) throws IOException {
-    m_output.write(CHAR_IAC);
+  protected void sendCommand(final int command) throws IOException {
+    m_output.write(TelnetInputStream.CHAR_IAC);
     m_output.write(command);
   }
 
-  protected void sendOption(int verb, int option) throws IOException {
-    this.sendCommand(verb);
+  protected void sendOption(final int verb, final int option) throws IOException {
+    sendCommand(verb);
     m_output.write(option);
   }
 
-  protected boolean stateMachine(int b) throws IOException {
+  protected boolean stateMachine(final int b) throws IOException {
     // System.out.println("Char: "+ b);
     switch (m_state) {
-      case STATE_CR:
-        if (b == LF) return false; // Strip latter part of CRLF
-        m_state = STATE_NORMAL;
+      case TelnetInputStream.STATE_CR:
+        if (b == TelnetInputStream.LF) {
+          return false; // Strip latter part of CRLF
+        }
+        m_state = TelnetInputStream.STATE_NORMAL;
         // FALL THRU
-      case STATE_NORMAL:
+      case TelnetInputStream.STATE_NORMAL:
         switch (b) {
           case 0:
             return false;
-          case CHAR_IAC:
-            m_state = STATE_IAC;
+          case TelnetInputStream.CHAR_IAC:
+            m_state = TelnetInputStream.STATE_IAC;
             return false;
-          case CR:
-            m_state = STATE_CR;
+          case TelnetInputStream.CR:
+            m_state = TelnetInputStream.STATE_CR;
             return true;
           default:
             return true;
         }
-      case STATE_IAC:
+      case TelnetInputStream.STATE_IAC:
         switch (b) {
-          case CHAR_IAC:
+          case TelnetInputStream.CHAR_IAC:
             // Escaped 255
             //
-            m_state = STATE_NORMAL;
+            m_state = TelnetInputStream.STATE_NORMAL;
             return true;
-          case CHAR_WILL:
-            m_state = STATE_WILL;
+          case TelnetInputStream.CHAR_WILL:
+            m_state = TelnetInputStream.STATE_WILL;
             break;
-          case CHAR_WONT:
-            m_state = STATE_WONT;
+          case TelnetInputStream.CHAR_WONT:
+            m_state = TelnetInputStream.STATE_WONT;
             break;
-          case CHAR_DO:
-            m_state = STATE_DO;
+          case TelnetInputStream.CHAR_DO:
+            m_state = TelnetInputStream.STATE_DO;
             break;
-          case CHAR_DONT:
-            m_state = STATE_DONT;
+          case TelnetInputStream.CHAR_DONT:
+            m_state = TelnetInputStream.STATE_DONT;
             break;
-          case CHAR_SB:
-            m_state = STATE_SB;
+          case TelnetInputStream.CHAR_SB:
+            m_state = TelnetInputStream.STATE_SB;
             break;
           default:
-            this.handleCommand(b);
-            m_state = STATE_NORMAL;
+            handleCommand(b);
+            m_state = TelnetInputStream.STATE_NORMAL;
             break;
         }
         break;
-      case STATE_WILL:
-        this.handleWill(b);
-        m_state = STATE_NORMAL;
+      case TelnetInputStream.STATE_WILL:
+        handleWill(b);
+        m_state = TelnetInputStream.STATE_NORMAL;
         break;
-      case STATE_WONT:
-        this.handleWont(b);
-        m_state = STATE_NORMAL;
+      case TelnetInputStream.STATE_WONT:
+        handleWont(b);
+        m_state = TelnetInputStream.STATE_NORMAL;
         break;
-      case STATE_DO:
-        this.handleDo(b);
-        m_state = STATE_NORMAL;
+      case TelnetInputStream.STATE_DO:
+        handleDo(b);
+        m_state = TelnetInputStream.STATE_NORMAL;
         break;
-      case STATE_DONT:
-        this.handleDont(b);
-        m_state = STATE_NORMAL;
+      case TelnetInputStream.STATE_DONT:
+        handleDont(b);
+        m_state = TelnetInputStream.STATE_NORMAL;
         break;
-      case STATE_SB:
-        Logger.debug(this, "SB: " + b);
+      case TelnetInputStream.STATE_SB:
+        LOG.debug("SB: " + b);
         switch (b) {
-          case OPT_NAWS:
+          case TelnetInputStream.OPT_NAWS:
             m_dataBuffer = new int[4];
             m_dataIdx = 0;
-            m_state = STATE_DATA;
+            m_state = TelnetInputStream.STATE_DATA;
             break;
-          case OPT_ENVIRON:
+          case TelnetInputStream.OPT_ENVIRON:
             m_dataBuffer = new int[8192];
             m_dataIdx = 0;
-            m_state = STATE_DATA;
+            m_state = TelnetInputStream.STATE_DATA;
             break;
         }
         m_dataState = b;
         break;
-      case STATE_DATA:
+      case TelnetInputStream.STATE_DATA:
         {
           switch (b) {
-            case CHAR_IAC:
-              m_state = STATE_AFTER_COMMAND;
+            case TelnetInputStream.CHAR_IAC:
+              m_state = TelnetInputStream.STATE_AFTER_COMMAND;
               break;
             default:
-              if (m_dataIdx < m_dataBuffer.length) m_dataBuffer[m_dataIdx++] = b;
-              else m_state = STATE_NORMAL; // Buffer overflow, go back to normal
+              if (m_dataIdx < m_dataBuffer.length) {
+                m_dataBuffer[m_dataIdx++] = b;
+              } else {
+                m_state = TelnetInputStream.STATE_NORMAL; // Buffer overflow, go back to normal
+              }
           }
           break;
         }
-      case STATE_AFTER_COMMAND:
-        if (b != CHAR_SE) {
+      case TelnetInputStream.STATE_AFTER_COMMAND:
+        if (b != TelnetInputStream.CHAR_SE) {
           // Huh? Not end of subnegotiation?
           //
-          m_state = STATE_NORMAL;
+          m_state = TelnetInputStream.STATE_NORMAL;
           break;
         }
         // End of command
         //
         switch (m_dataState) {
-          case OPT_NAWS:
-            this.handleNaws();
-            m_state = STATE_NORMAL;
+          case TelnetInputStream.OPT_NAWS:
+            handleNaws();
+            m_state = TelnetInputStream.STATE_NORMAL;
             break;
-          case OPT_ENVIRON:
-            this.handleEnviron();
-            m_state = STATE_NORMAL;
+          case TelnetInputStream.OPT_ENVIRON:
+            handleEnviron();
+            m_state = TelnetInputStream.STATE_NORMAL;
           default:
-            m_state = STATE_NORMAL;
+            m_state = TelnetInputStream.STATE_NORMAL;
         }
         break;
     }
     return false;
   }
 
-  protected void handleCommand(int ch) {
-    Logger.debug(this, "Command: " + ch);
+  protected void handleCommand(final int ch) {
+    LOG.debug("Command: " + ch);
   }
 
-  protected void handleWill(int ch) throws IOException {
-    Logger.debug(this, "Will: " + ch);
+  protected void handleWill(final int ch) throws IOException {
+    LOG.debug("Will: " + ch);
     switch (ch) {
-      case OPT_LINEMODE:
-        this.sendOption(CHAR_DONT, OPT_LINEMODE);
-        this.sendOption(CHAR_WONT, OPT_LINEMODE);
+      case TelnetInputStream.OPT_LINEMODE:
+        sendOption(TelnetInputStream.CHAR_DONT, TelnetInputStream.OPT_LINEMODE);
+        sendOption(TelnetInputStream.CHAR_WONT, TelnetInputStream.OPT_LINEMODE);
         break;
-      case OPT_FLOWCONTROL:
-        this.sendOption(CHAR_DONT, OPT_FLOWCONTROL);
-        this.sendOption(CHAR_WONT, OPT_FLOWCONTROL);
+      case TelnetInputStream.OPT_FLOWCONTROL:
+        sendOption(TelnetInputStream.CHAR_DONT, TelnetInputStream.OPT_FLOWCONTROL);
+        sendOption(TelnetInputStream.CHAR_WONT, TelnetInputStream.OPT_FLOWCONTROL);
         break;
     }
   }
 
-  protected void handleWont(int ch) {
-    Logger.debug(this, "Won't: " + ch);
+  protected void handleWont(final int ch) {
+    LOG.debug("Won't: " + ch);
   }
 
-  protected void handleDo(int ch) throws IOException {
-    Logger.debug(this, "Do: " + ch);
+  protected void handleDo(final int ch) throws IOException {
+    LOG.debug("Do: " + ch);
     switch (ch) {
-      case OPT_ECHO:
+      case TelnetInputStream.OPT_ECHO:
         // Yes, we will echo
         //
-        this.sendOption(CHAR_WILL, OPT_ECHO);
+        sendOption(TelnetInputStream.CHAR_WILL, TelnetInputStream.OPT_ECHO);
         break;
-      case OPT_SUPPRESS_GA:
+      case TelnetInputStream.OPT_SUPPRESS_GA:
         // Yes, we will supress GA
         //
-        this.sendOption(CHAR_WILL, OPT_SUPPRESS_GA);
+        sendOption(TelnetInputStream.CHAR_WILL, TelnetInputStream.OPT_SUPPRESS_GA);
         break;
     }
   }
 
-  protected void handleDont(int ch) throws IOException {
-    Logger.debug(this, "Don't: " + ch);
+  protected void handleDont(final int ch) throws IOException {
+    LOG.debug("Don't: " + ch);
     switch (ch) {
-      case OPT_ECHO:
+      case TelnetInputStream.OPT_ECHO:
         // I'm sorry, but we will echo
         //
-        this.sendOption(CHAR_WILL, OPT_ECHO);
+        sendOption(TelnetInputStream.CHAR_WILL, TelnetInputStream.OPT_ECHO);
         break;
-      case OPT_SUPPRESS_GA:
+      case TelnetInputStream.OPT_SUPPRESS_GA:
         // I'm sorry, but we will supress GA.
         //
-        this.sendOption(CHAR_WILL, OPT_SUPPRESS_GA);
+        sendOption(TelnetInputStream.CHAR_WILL, TelnetInputStream.OPT_SUPPRESS_GA);
         break;
     }
   }
 
   protected void handleNaws() {
-    int width = (complement2(m_dataBuffer[0]) << 8) + complement2(m_dataBuffer[1]);
-    int height = (complement2(m_dataBuffer[2]) << 8) + complement2(m_dataBuffer[3]);
-    Logger.debug(this, "NAWS: " + width + "*" + height);
+    final int width =
+        (TelnetInputStream.complement2(m_dataBuffer[0]) << 8)
+            + TelnetInputStream.complement2(m_dataBuffer[1]);
+    final int height =
+        (TelnetInputStream.complement2(m_dataBuffer[2]) << 8)
+            + TelnetInputStream.complement2(m_dataBuffer[3]);
+    LOG.debug("NAWS: " + width + "*" + height);
     synchronized (m_sizeListeners) {
-      for (TerminalSizeListener terminalSizeListener : m_sizeListeners) {
+      for (final TerminalSizeListener terminalSizeListener : m_sizeListeners) {
         terminalSizeListener.terminalSizeChanged(width, height);
       }
     }
@@ -393,83 +415,82 @@ public class TelnetInputStream extends InputStream {
   protected void handleEnviron() {
     // First byte is "IS" or "INFO". We treat them both the same. Ignore anything else
     //
-    int subCommand = m_dataBuffer[0];
-    if (subCommand != CHAR_IS && subCommand != CHAR_INFO) return;
+    final int subCommand = m_dataBuffer[0];
+    if (subCommand != TelnetInputStream.CHAR_IS && subCommand != TelnetInputStream.CHAR_INFO) {
+      return;
+    }
 
     // Now parse variable data
     //
-    int state = ENV_STATE_NEW;
-    int top = m_dataIdx;
+    int state = TelnetInputStream.ENV_STATE_NEW;
+    final int top = m_dataIdx;
     StringBuffer buffer = null;
     String name = "";
-    String value = "";
+    String value;
     for (int idx = 1; idx < top; ++idx) {
-      char ch = (char) m_dataBuffer[idx];
+      final char ch = (char) m_dataBuffer[idx];
       switch (state) {
-        case ENV_STATE_NEW:
+        case TelnetInputStream.ENV_STATE_NEW:
           switch (ch) {
-            case CHAR_USERVAR:
-            case CHAR_VAR:
+            case TelnetInputStream.CHAR_USERVAR:
+            case TelnetInputStream.CHAR_VAR:
               // Start of variable
               //
-              state = ENV_STATE_VAR;
+              state = TelnetInputStream.ENV_STATE_VAR;
               buffer = new StringBuffer();
               break;
             default:
               // Unknown character. Go back to start state
               //
-              state = ENV_STATE_NEW;
+              state = TelnetInputStream.ENV_STATE_NEW;
           }
           break;
-        case ENV_STATE_VALUE:
-        case ENV_STATE_VAR:
+        case TelnetInputStream.ENV_STATE_VALUE:
+        case TelnetInputStream.ENV_STATE_VAR:
           switch (ch) {
-            case CHAR_ESC:
-              state = ENV_STATE_ESC;
+            case TelnetInputStream.CHAR_ESC:
+              state = TelnetInputStream.ENV_STATE_ESC;
               break;
-            case CHAR_VALUE:
+            case TelnetInputStream.CHAR_VALUE:
               name = buffer.toString();
               buffer = new StringBuffer();
-              state = ENV_STATE_VALUE;
+              state = TelnetInputStream.ENV_STATE_VALUE;
               break;
-            case CHAR_USERVAR:
-            case CHAR_VAR:
-              if (state == ENV_STATE_VALUE) {
+            case TelnetInputStream.CHAR_USERVAR:
+            case TelnetInputStream.CHAR_VAR:
+              if (state == TelnetInputStream.ENV_STATE_VALUE) {
                 value = buffer.toString();
-                state = ENV_STATE_VAR;
+                state = TelnetInputStream.ENV_STATE_VAR;
               } else {
                 name = buffer.toString();
                 value = "";
               }
               buffer = new StringBuffer();
-              this.handleEnvironmentVariable(name, value);
+              handleEnvironmentVariable(name, value);
               break;
             default:
               buffer.append(ch);
               break;
           }
           break;
-        case ENV_STATE_ESC:
+        case TelnetInputStream.ENV_STATE_ESC:
           buffer.append(ch);
           break;
       }
     }
     // Handle dangling variable
     //
-    if (name.length() > 0)
-      this.handleEnvironmentVariable(name, buffer != null ? buffer.toString() : "");
-  }
-
-  protected void handleEnvironmentVariable(String name, String value) {
-    Logger.debug(this, "ENVIRON: var=" + name + " value=" + value);
-    synchronized (m_environmentListeners) {
-      for (EnvironmentListener environmentListener : m_environmentListeners) {
-        environmentListener.environmentChanged(name, value);
-      }
+    if (name.length() > 0) {
+      handleEnvironmentVariable(name, buffer.toString());
     }
   }
 
-  protected static int complement2(int n) {
-    return n < 0 ? 256 + n : n;
+  protected void handleEnvironmentVariable(final String name, final String value) {
+    LOG.debug("ENVIRON: var=" + name + " value=" + value);
+    synchronized (m_environmentListeners) {
+      for (final EnvironmentListener environmentListener : m_environmentListeners) {
+        environmentListener.environmentChanged(name, value);
+      }
+    }
   }
 }

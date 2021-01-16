@@ -16,7 +16,7 @@ import java.util.List;
 /**
  * User session output.
  *
- * @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a>
+ * @author Pontus Rydin
  */
 public class KOMWriter extends PrintWriter {
   private PrintWriter m_writer;

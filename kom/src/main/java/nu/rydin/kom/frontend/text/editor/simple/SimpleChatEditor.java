@@ -13,7 +13,7 @@ import nu.rydin.kom.exceptions.UnexpectedException;
 import nu.rydin.kom.frontend.text.Context;
 import nu.rydin.kom.structs.UnstoredMessage;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class SimpleChatEditor extends AbstractEditor {
   public SimpleChatEditor(Context context) throws IOException, UnexpectedException {
     super("chateditorcommands.xml", context);

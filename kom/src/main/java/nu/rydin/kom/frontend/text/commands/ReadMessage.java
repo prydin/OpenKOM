@@ -13,7 +13,7 @@ import nu.rydin.kom.frontend.text.parser.TextNumberParameter;
 import nu.rydin.kom.structs.MessageLocator;
 import nu.rydin.kom.structs.NameAssociation;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class ReadMessage extends AbstractReadMessage {
   public ReadMessage(Context context, String fullName, long permissions) {
     super(

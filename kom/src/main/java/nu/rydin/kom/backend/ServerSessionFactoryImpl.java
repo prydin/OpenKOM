@@ -19,7 +19,6 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.StringTokenizer;
@@ -33,7 +32,6 @@ import nu.rydin.kom.constants.UserFlags;
 import nu.rydin.kom.constants.UserPermissions;
 import nu.rydin.kom.events.UserAttendanceEvent;
 import nu.rydin.kom.exceptions.AlreadyLoggedInException;
-import nu.rydin.kom.exceptions.AmbiguousNameException;
 import nu.rydin.kom.exceptions.AuthenticationException;
 import nu.rydin.kom.exceptions.AuthorizationException;
 import nu.rydin.kom.exceptions.DuplicateNameException;
@@ -48,85 +46,27 @@ import nu.rydin.kom.structs.SessionListItem;
 import nu.rydin.kom.structs.UserInfo;
 import nu.rydin.kom.utils.Base64;
 import nu.rydin.kom.utils.FileUtils;
-import nu.rydin.kom.utils.Logger;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class ServerSessionFactoryImpl implements ServerSessionFactory, Module {
-  private int m_nextSessionId = 0;
-
-  private Map<String, IntrusionAttempt> intrusionAttempts =
+  private static final Logger LOG = LogManager.getLogger(ServerSessionFactoryImpl.class);
+  private final Map<String, IntrusionAttempt> intrusionAttempts =
       Collections.synchronizedMap(new HashMap<String, IntrusionAttempt>());
-
-  private SessionManager m_sessionManager;
-
   /** Valid tickets */
-  private Map<String, Long> m_validTickets =
-      Collections.synchronizedMap(new HashMap<String, Long>());
-
+  private final Map<String, Long> m_validTickets = Collections.synchronizedMap(new HashMap<>());
   /** General purpose timer for ticket expirations and intrusion attempt clearing */
-  private Timer timer = new Timer(true);
+  private final Timer timer = new Timer(true);
 
-  private class TicketKiller extends TimerTask {
-    private String m_ticket;
-
-    public TicketKiller(String ticket) {
-      m_ticket = ticket;
-    }
-
-    public void run() {
-      if (ServerSessionFactoryImpl.this.m_validTickets.remove(m_ticket) != null)
-        Logger.info(this, "Discarded unused ticket");
-    }
-  }
-
-  private class IntrusionKiller extends TimerTask {
-    private String client;
-
-    public IntrusionKiller(String client) {
-      this.client = client;
-    }
-
-    public void run() {
-      synchronized (ServerSessionFactoryImpl.this.intrusionAttempts) {
-        IntrusionAttempt ia = ServerSessionFactoryImpl.this.intrusionAttempts.get(client);
-        if (ia != null) {
-          // Decrease attempt count and remove if it reached zero
-          //
-          if (ia.expireAttempt() == 0) {
-            intrusionAttempts.remove(client);
-            Logger.info(this, "Discarded expired intrusion attempt for: " + client);
-          }
-        }
-      }
-    }
-  }
-
-  private class ContextCleaner extends Thread {
-    public void run() {
-      try {
-        UserContextFactory ucf = UserContextFactory.getInstance();
-        for (; ; ) {
-          Thread.sleep(60000);
-          synchronized (ucf) {
-            List<UserContext> list = ucf.listContexts();
-            for (UserContext each : list) {
-              if (!ServerSessionFactoryImpl.this.m_sessionManager.userHasSession(
-                  each.getUserId())) {
-                ucf.release(each.getUserId());
-                Logger.info(this, "Released rogue context for user " + each.getUserId());
-              }
-            }
-          }
-        }
-      } catch (InterruptedException e) {
-        Logger.info(this, "ContextCleaner shutting down...");
-      }
-    }
-  }
-
+  private int m_nextSessionId = 0;
+  private SessionManager m_sessionManager;
   private ContextCleaner m_contextCleaner;
 
-  public void start(Map<String, String> properties) throws ModuleException {
+  public ServerSessionFactoryImpl() throws UnexpectedException {}
+
+  @Override
+  public void start(final Map<String, String> properties) throws ModuleException {
     // Initialize the static global server settings class.
     //
     ServerSettings.initialize(properties);
@@ -147,12 +87,12 @@ public class ServerSessionFactoryImpl implements ServerSessionFactory, Module {
     //
     // Check that we have the character sets we need
     //
-    StringTokenizer st = new StringTokenizer(ClientSettings.getCharsets(), ",");
+    final StringTokenizer st = new StringTokenizer(ClientSettings.getCharsets(), ",");
     while (st.hasMoreTokens()) {
-      String charSet = st.nextToken();
+      final String charSet = st.nextToken();
       try {
         new OutputStreamWriter(System.out, charSet);
-      } catch (UnsupportedEncodingException e) {
+      } catch (final UnsupportedEncodingException e) {
         throw new ModuleException(
             "Character set "
                 + charSet
@@ -167,7 +107,7 @@ public class ServerSessionFactoryImpl implements ServerSessionFactory, Module {
     DataAccess da = null;
     try {
       da = DataAccessPool.instance().getDataAccess();
-      UserManager um = da.getUserManager();
+      final UserManager um = da.getUserManager();
 
       // FIXME Move to a bootstrapping sql-script.
       // Make sure there is at least a sysop in the database.
@@ -197,22 +137,18 @@ public class ServerSessionFactoryImpl implements ServerSessionFactory, Module {
         da.commit();
         committed = true;
       }
-    } catch (SQLException e) {
+    } catch (final SQLException e) {
       throw new ModuleException(e);
-    } catch (NoSuchAlgorithmException e) {
+    } catch (final NoSuchAlgorithmException e) {
       // Could not calculate password digest. Should not happen!
       //
       throw new ModuleException(e);
-    } catch (AmbiguousNameException e) {
-      // Ambigous name when adding sysop. Should not happen!
-      //
-      throw new ModuleException(e);
-    } catch (DuplicateNameException e) {
+    } catch (final DuplicateNameException e) {
       // Duplicate name when adding sysop. Should not happen!
       //
       throw new ModuleException(e);
-    } catch (UnexpectedException e) {
-      // Noone expects ths Spanish Inquisition!
+    } catch (final UnexpectedException e) {
+      // No one expects ths Spanish Inquisition!
       //
       throw new ModuleException(e);
     } finally {
@@ -220,7 +156,7 @@ public class ServerSessionFactoryImpl implements ServerSessionFactory, Module {
         if (!committed) {
           try {
             da.rollback();
-          } catch (UnexpectedException e) {
+          } catch (final UnexpectedException e) {
             // This is probably bad if it happens.
             throw new ModuleException(e);
           }
@@ -233,29 +169,33 @@ public class ServerSessionFactoryImpl implements ServerSessionFactory, Module {
     m_sessionManager.start();
   }
 
+  @Override
   public void stop() {
     m_sessionManager.stop();
     m_contextCleaner.interrupt();
   }
 
+  @Override
   public void join() throws InterruptedException {
     m_sessionManager.join();
     m_contextCleaner.join();
   }
 
-  public ServerSessionFactoryImpl() throws UnexpectedException {}
-
-  public void notifySuccessfulLogin(String client) {
+  @Override
+  public void notifySuccessfulLogin(final String client) {
     intrusionAttempts.remove(client);
   }
 
-  public void notifyFailedLogin(String client, int limit, long lockout) {
+  @Override
+  public void notifyFailedLogin(final String client, final int limit, final long lockout) {
     synchronized (intrusionAttempts) {
       IntrusionAttempt ia = intrusionAttempts.get(client);
       if (ia == null) {
         ia = new IntrusionAttempt(client, limit, lockout);
         intrusionAttempts.put(client, ia);
-      } else ia.addAttempt();
+      } else {
+        ia.addAttempt();
+      }
 
       // We schedule a timer for every attempt. When they expire, they will decrease the
       // counter, resulting in the lockout to run from the last attempt
@@ -264,52 +204,57 @@ public class ServerSessionFactoryImpl implements ServerSessionFactory, Module {
     }
   }
 
-  public boolean isBlacklisted(String client) {
+  @Override
+  public boolean isBlacklisted(final String client) {
     synchronized (intrusionAttempts) {
-      IntrusionAttempt ia = intrusionAttempts.get(client);
-      if (ia == null) return false;
+      final IntrusionAttempt ia = intrusionAttempts.get(client);
+      if (ia == null) {
+        return false;
+      }
       return ia.isBlocked();
     }
   }
 
-  public ServerSession login(String ticket, short clientType, boolean allowMulti)
+  @Override
+  public ServerSession login(final String ticket, final short clientType, final boolean allowMulti)
       throws AuthenticationException, LoginProhibitedException, AlreadyLoggedInException,
           UnexpectedException {
     // Log us in!
     //
-    DataAccess da = DataAccessPool.instance().getDataAccess();
+    final DataAccess da = DataAccessPool.instance().getDataAccess();
     try {
-      long id = this.authenticate(ticket);
-      ServerSession session = this.innerLogin(id, clientType, da, allowMulti);
-      this.consumeTicket(ticket);
+      final long id = authenticate(ticket);
+      final ServerSession session = innerLogin(id, clientType, da, allowMulti);
+      consumeTicket(ticket);
       return session;
     } finally {
       DataAccessPool.instance().returnDataAccess(da);
     }
   }
 
-  private ServerSession innerLogin(long id, short clientType, DataAccess da, boolean allowMulti)
+  private ServerSession innerLogin(
+      final long id, final short clientType, final DataAccess da, final boolean allowMulti)
       throws AuthenticationException, LoginProhibitedException, AlreadyLoggedInException,
           UnexpectedException {
     try {
       // Authenticate user
       //
-      UserManager um = da.getUserManager();
-      UserInfo ui = um.loadUser(id);
+      final UserManager um = da.getUserManager();
+      final UserInfo ui = um.loadUser(id);
 
       // Login prohibited? Allow login only if sysop
       //
-      if (!m_sessionManager.canLogin() && (ui.getRights() & UserPermissions.ADMIN) == 0)
+      if (!m_sessionManager.canLogin() && (ui.getRights() & UserPermissions.ADMIN) == 0) {
         throw new LoginProhibitedException();
+      }
 
       // Was the user already logged in?
       //
-      List<ServerSession> userSessions = m_sessionManager.getSessionsByUser(id);
-      int top = userSessions.size();
+      final List<ServerSession> userSessions = m_sessionManager.getSessionsByUser(id);
+      final int top = userSessions.size();
       if (!allowMulti && top > 0) {
-        ArrayList<SessionListItem> list = new ArrayList<SessionListItem>(top);
-        for (Iterator<ServerSession> itor = userSessions.iterator(); itor.hasNext(); ) {
-          ServerSession each = itor.next();
+        final ArrayList<SessionListItem> list = new ArrayList<>(top);
+        for (final ServerSession each : userSessions) {
           list.add(
               new SessionListItem(
                   each.getSessionId(),
@@ -323,7 +268,7 @@ public class ServerSessionFactoryImpl implements ServerSessionFactory, Module {
       // Create a ServerSessionImpl, wrapped in a dynamic proxy and an InvocationHandler
       // keeping track of connections and transactions.
       //
-      ServerSessionImpl session =
+      final ServerSessionImpl session =
           new ServerSessionImpl(da, id, m_nextSessionId++, clientType, m_sessionManager);
       m_sessionManager.registerSession(session);
 
@@ -335,14 +280,14 @@ public class ServerSessionFactoryImpl implements ServerSessionFactory, Module {
 
       //  Create transactional wrapper and return
       //
-      InvocationHandler handler = new TransactionalInvocationHandler(session);
+      final InvocationHandler handler = new TransactionalInvocationHandler(session);
       return (ServerSession)
           Proxy.newProxyInstance(
               ServerSession.class.getClassLoader(), new Class[] {ServerSession.class}, handler);
 
-    } catch (SQLException e) {
+    } catch (final SQLException e) {
       throw new UnexpectedException(-1, e);
-    } catch (ObjectNotFoundException e) {
+    } catch (final ObjectNotFoundException e) {
       // User was not found. We treat that as an authentication
       // exception.
       //
@@ -350,145 +295,150 @@ public class ServerSessionFactoryImpl implements ServerSessionFactory, Module {
     }
   }
 
-  public ServerSession login(String user, String password, short clientType, boolean allowMulti)
+  @Override
+  public ServerSession login(
+      final String user, final String password, final short clientType, final boolean allowMulti)
       throws AuthenticationException, LoginProhibitedException, AlreadyLoggedInException,
           UnexpectedException {
-    DataAccess da = DataAccessPool.instance().getDataAccess();
+    final DataAccess da = DataAccessPool.instance().getDataAccess();
     try {
-      UserManager um = da.getUserManager();
+      final UserManager um = da.getUserManager();
 
       // Authenticate user
       //
-      long id = um.authenticate(user, password);
-      return this.innerLogin(id, clientType, da, allowMulti);
-    } catch (SQLException e) {
+      final long id = um.authenticate(user, password);
+      return innerLogin(id, clientType, da, allowMulti);
+    } catch (final SQLException | NoSuchAlgorithmException e) {
       throw new UnexpectedException(-1, e);
-    } catch (ObjectNotFoundException e) {
+    } catch (final ObjectNotFoundException e) {
       // User was not found. We treat that as an authentication
       // exception.
       //
       throw new AuthenticationException();
-    } catch (NoSuchAlgorithmException e) {
-      // Could not calculate password digest. Should not happen!
-      //
-      throw new UnexpectedException(-1, e);
     } finally {
       DataAccessPool.instance().returnDataAccess(da);
     }
   }
 
-  public String generateTicket(String user, String password)
+  @Override
+  public String generateTicket(final String user, final String password)
       throws AuthenticationException, UnexpectedException {
     // Check that username and password are valid.
     //
-    long userId = this.authenticate(user, password);
+    final long userId = authenticate(user, password);
     try {
       // Generate 128 bytes of random data and calculate MD5
       // digest. A ticket is typically valid for <30s, so
       // this feels fairly secure.
       //
-      MessageDigest md = MessageDigest.getInstance("MD5");
-      byte[] data = new byte[128];
+      final MessageDigest md = MessageDigest.getInstance("MD5");
+      final byte[] data = new byte[128];
       SecureRandom.getInstance("SHA1PRNG").nextBytes(data);
       md.update(data);
-      String ticket = Base64.encodeBytes(md.digest());
+      final String ticket = Base64.encodeBytes(md.digest());
 
       // Have a valid ticket! Now register it.
       //
       m_validTickets.put(ticket, userId);
       timer.schedule(new TicketKiller(ticket), ServerSettings.getTicketLifetime());
       return ticket;
-    } catch (NoSuchAlgorithmException e) {
+    } catch (final NoSuchAlgorithmException e) {
       throw new UnexpectedException(-1, e);
     }
   }
 
-  public void consumeTicket(String ticket) throws AuthenticationException {
-    Long idObj = (Long) m_validTickets.remove(ticket);
+  @Override
+  public void consumeTicket(final String ticket) throws AuthenticationException {
+    final Long idObj = m_validTickets.remove(ticket);
     if (idObj == null) {
       throw new AuthenticationException();
     }
   }
 
-  public long authenticate(String ticket) throws AuthenticationException {
-    Long idObj = (Long) m_validTickets.get(ticket);
+  @Override
+  public long authenticate(final String ticket) throws AuthenticationException {
+    final Long idObj = m_validTickets.get(ticket);
     if (idObj == null) {
       throw new AuthenticationException();
     }
-    return idObj.longValue();
+    return idObj;
   }
 
-  public long authenticate(String user, String password)
+  @Override
+  public long authenticate(final String user, final String password)
       throws AuthenticationException, UnexpectedException {
-    DataAccess da = DataAccessPool.instance().getDataAccess();
+    final DataAccess da = DataAccessPool.instance().getDataAccess();
     try {
-      UserManager um = da.getUserManager();
+      final UserManager um = da.getUserManager();
 
       // Authenticate user
       //
       return um.authenticate(user, password);
-    } catch (ObjectNotFoundException e) {
+    } catch (final ObjectNotFoundException e) {
       // User was not found. We treat that as an authentication
       // exception.
       //
       throw new AuthenticationException();
-    } catch (NoSuchAlgorithmException e) {
+    } catch (final NoSuchAlgorithmException | SQLException e) {
       // Could not calculate password digest. Should not happen!
       //
-      throw new UnexpectedException(-1, e);
-    } catch (SQLException e) {
       throw new UnexpectedException(-1, e);
     } finally {
       DataAccessPool.instance().returnDataAccess(da);
     }
   }
 
+  @Override
   public boolean allowsSelfRegistration() throws UnexpectedException {
-    DataAccessPool dap = DataAccessPool.instance();
-    DataAccess da = dap.getDataAccess();
+    final DataAccessPool dap = DataAccessPool.instance();
+    final DataAccess da = dap.getDataAccess();
     try {
-      SettingsManager sm = da.getSettingManager();
+      final SettingsManager sm = da.getSettingManager();
       return sm.getNumber(SettingKeys.ALLOW_SELF_REGISTER) != 0;
-    } catch (ObjectNotFoundException e) {
+    } catch (final ObjectNotFoundException e) {
       // Not found? Not set!
       //
       return false;
-    } catch (SQLException e) {
+    } catch (final SQLException e) {
       throw new UnexpectedException(-1, e);
     } finally {
       dap.returnDataAccess(da);
     }
   }
 
-  public boolean loginExits(String userid) throws AuthorizationException, UnexpectedException {
-    DataAccessPool dap = DataAccessPool.instance();
-    DataAccess da = dap.getDataAccess();
+  @Override
+  public boolean loginExits(final String userid) throws UnexpectedException {
+    final DataAccessPool dap = DataAccessPool.instance();
+    final DataAccess da = dap.getDataAccess();
     try {
       da.getUserManager().getUserIdByLogin(userid);
       return true;
-    } catch (ObjectNotFoundException e) {
+    } catch (final ObjectNotFoundException e) {
       return false;
-    } catch (SQLException e) {
+    } catch (final SQLException e) {
       throw new UnexpectedException(-1, e);
     } finally {
       dap.returnDataAccess(da);
     }
   }
 
-  public long selfRegister(String login, String password, String fullName, String charset)
-      throws AuthorizationException, UnexpectedException, AmbiguousNameException,
-          DuplicateNameException {
-    DataAccessPool dap = DataAccessPool.instance();
-    DataAccess da = dap.getDataAccess();
+  @Override
+  public long selfRegister(
+      final String login, final String password, final String fullName, final String charset)
+      throws AuthorizationException, UnexpectedException, DuplicateNameException {
+    final DataAccessPool dap = DataAccessPool.instance();
+    final DataAccess da = dap.getDataAccess();
     boolean committed = false;
     try {
       // Are we allowed to do this?
       //
-      if (!this.allowsSelfRegistration()) throw new AuthorizationException();
+      if (!allowsSelfRegistration()) {
+        throw new AuthorizationException();
+      }
 
       // Create user
       //
-      long id =
+      final long id =
           da.getUserManager()
               .addUser(
                   login,
@@ -515,13 +465,13 @@ public class ServerSessionFactoryImpl implements ServerSessionFactory, Module {
       // Create a login-script to help this user set stuff up
       //
       try {
-        String content = FileUtils.loadTextFromResource("selfregistered.login");
-        FileManager fm = da.getFileManager();
+        final String content = FileUtils.loadTextFromResource("selfregistered.login");
+        final FileManager fm = da.getFileManager();
         fm.store(id, ".login.cmd", content);
-      } catch (FileNotFoundException e) {
+      } catch (final FileNotFoundException e) {
         // No command file exists? Probably just means the
         // sysop doesn't think one is needed. Just skip!
-      } catch (IOException e) {
+      } catch (final IOException e) {
         throw new UnexpectedException(-1, e);
       }
       // Done!
@@ -529,38 +479,103 @@ public class ServerSessionFactoryImpl implements ServerSessionFactory, Module {
       da.commit();
       committed = true;
       return id;
-    } catch (SQLException e) {
-      throw new UnexpectedException(-1, e);
-    } catch (NoSuchAlgorithmException e) {
+    } catch (final SQLException | NoSuchAlgorithmException e) {
       throw new UnexpectedException(-1, e);
     } finally {
-      if (!committed) da.rollback();
+      if (!committed) {
+        da.rollback();
+      }
       dap.returnDataAccess(da);
     }
   }
 
-  public void killSession(int sessionId, String user, String password)
+  @Override
+  public void killSession(final int sessionId, final String user, final String password)
       throws AuthenticationException, UnexpectedException, InterruptedException {
     // Authenticate
     //
-    long id = this.authenticate(user, password);
-    this.innerKillSession(sessionId, id);
+    final long id = authenticate(user, password);
+    innerKillSession(sessionId, id);
   }
 
-  public void killSession(int session, String ticket)
+  @Override
+  public void killSession(final int session, final String ticket)
       throws AuthenticationException, UnexpectedException, InterruptedException {
     // Authenticate
     //
-    long id = this.authenticate(ticket);
-    this.innerKillSession(session, id);
+    final long id = authenticate(ticket);
+    innerKillSession(session, id);
   }
 
-  protected void innerKillSession(int sessionId, long userId)
+  protected void innerKillSession(final int sessionId, final long userId)
       throws AuthenticationException, UnexpectedException, InterruptedException {
     // We can only kill our own sessions
     //
-    ServerSession sess = m_sessionManager.getSessionById(sessionId);
-    if (sess.getLoggedInUserId() != userId) throw new AuthenticationException();
+    final ServerSession sess = m_sessionManager.getSessionById(sessionId);
+    if (sess.getLoggedInUserId() != userId) {
+      throw new AuthenticationException();
+    }
     m_sessionManager.killSessionById(sessionId);
+  }
+
+  private class TicketKiller extends TimerTask {
+    private final String m_ticket;
+
+    public TicketKiller(final String ticket) {
+      m_ticket = ticket;
+    }
+
+    @Override
+    public void run() {
+      if (m_validTickets.remove(m_ticket) != null) {
+        LOG.info("Discarded unused ticket");
+      }
+    }
+  }
+
+  private class IntrusionKiller extends TimerTask {
+    private final String client;
+
+    public IntrusionKiller(final String client) {
+      this.client = client;
+    }
+
+    @Override
+    public void run() {
+      synchronized (intrusionAttempts) {
+        final IntrusionAttempt ia = intrusionAttempts.get(client);
+        if (ia != null) {
+          // Decrease attempt count and remove if it reached zero
+          //
+          if (ia.expireAttempt() == 0) {
+            intrusionAttempts.remove(client);
+            LOG.info("Discarded expired intrusion attempt for: " + client);
+          }
+        }
+      }
+    }
+  }
+
+  private class ContextCleaner extends Thread {
+    @Override
+    public void run() {
+      try {
+        final UserContextFactory ucf = UserContextFactory.getInstance();
+        for (; ; ) {
+          Thread.sleep(60000);
+          synchronized (ucf) {
+            final List<UserContext> list = ucf.listContexts();
+            for (final UserContext each : list) {
+              if (!m_sessionManager.userHasSession(each.getUserId())) {
+                ucf.release(each.getUserId());
+                LOG.info("Released rogue context for user " + each.getUserId());
+              }
+            }
+          }
+        }
+      } catch (final InterruptedException e) {
+        LOG.info("ContextCleaner shutting down...");
+      }
+    }
   }
 }

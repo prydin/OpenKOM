@@ -8,7 +8,7 @@ package nu.rydin.kom.utils;
 
 import java.io.PrintWriter;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class PrintUtils {
   public static void printColumn(final PrintWriter out, final String message, final int colLength) {
     out.print(message);

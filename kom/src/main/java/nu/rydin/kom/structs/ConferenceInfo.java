@@ -8,7 +8,7 @@ package nu.rydin.kom.structs;
 
 import java.sql.Timestamp;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class ConferenceInfo extends NamedObject {
   static final long serialVersionUID = 2005;
 

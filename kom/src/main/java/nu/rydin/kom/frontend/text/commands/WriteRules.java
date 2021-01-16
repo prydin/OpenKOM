@@ -15,7 +15,7 @@ import nu.rydin.kom.frontend.text.Context;
 import nu.rydin.kom.structs.MessageOccurrence;
 import nu.rydin.kom.structs.UnstoredMessage;
 
-/** @author <a href=mailto:jepson@xyzzy.se>Jepson</a> */
+/** @author Jepson */
 public class WriteRules extends AbstractCommand {
   public WriteRules(Context context, String fullname, long permissions) {
     super(fullname, AbstractCommand.NO_PARAMETERS, permissions);

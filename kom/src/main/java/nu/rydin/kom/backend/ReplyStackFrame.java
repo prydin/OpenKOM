@@ -6,15 +6,13 @@
  */
 package nu.rydin.kom.backend;
 
-/** @author <a href=mailto:pontus@rydin.nu>Pontus Rydin</a> */
+/** @author Pontus Rydin */
 public class ReplyStackFrame {
-  private long[] m_replies;
-
+  private final long[] m_replies;
+  private final ReplyStackFrame m_next;
   private int m_idx;
 
-  private ReplyStackFrame m_next;
-
-  public ReplyStackFrame(long[] replies, ReplyStackFrame next) {
+  public ReplyStackFrame(final long[] replies, final ReplyStackFrame next) {
     m_replies = replies;
     m_next = next;
     m_idx = 0;
